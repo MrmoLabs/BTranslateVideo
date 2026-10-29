@@ -8,6 +8,7 @@
 uv run --no-sync pytest -q
 python scripts/check_repository.py
 node --check app/static/app.js
+node tests/check_i18n.cjs
 ```
 
 FFmpeg/FFprobe 需要在 PATH。测试覆盖字幕词保留、断句、翻译匹配、编辑冲突、失败保护、取消、缓存、情绪隔离、试听、时间轴及真实 FFmpeg 混音/导出。模型使用替身，不要求 GPU、模型权重或视频素材。CI 不运行真实模型下载和推理，也不代表安装流程或听感验收通过。
@@ -27,3 +28,11 @@ FFmpeg/FFprobe 需要在 PATH。测试覆盖字幕词保留、断句、翻译匹
 5. 播放 MP4，切换字幕、拖动进度，检查原声/中文 MKV 音轨与下载。
 
 性能对比使用 `scripts/benchmark_tts_profiles.py --request <tts-request.json> --out <新目录>`。请求包含用户自备的 text/reference/output 等字段，格式参考代码；不要提交真实参考录音、绝对路径或测试输出。双实例测试可能需要更多显存，默认生产仍使用单实例合批。
+
+## 模型复用与多语言补充验收
+
+连续两句真实 IndexTTS 调试在同一进程完成；第二次请求模型加载耗时为 0，空闲到期后 GPU 锁释放。另通过页面验证连续试听和手动释放。该测试只反映指定机器与两句文本，不代表通用加速比。
+
+新增源语言导入校验、界面词条占位符完整性、用户内容隔离，以及常驻进程的复用、取消、崩溃恢复、权重变化、参考音替换、超时和关闭测试。中英切换以浏览器检查未保存草稿保留。
+
+`python scripts/verify_translation_quality.py --cases tests/multilingual_cases.json --out runtime/multilingual-verification` 可对法/德/西/韩示例运行实际本地模型；它验证文本语义，不等于新语种完整视频 ASR 或听感验收。

@@ -1,7 +1,7 @@
 [project]
 name = "btranslatevideo"
 version = "0.1.0"
-description = "Local English/Japanese video translation and Chinese voice dubbing"
+description = "Local multilingual video translation and Chinese voice dubbing"
 readme = "README.md"
 authors = [{name = "MrmoLabs"}]
 license = "MIT AND LicenseRef-Bilibili-Model-Use"

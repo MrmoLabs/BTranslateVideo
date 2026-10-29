@@ -45,6 +45,7 @@ class Settings(BaseModel):
     max_lag: float = Field(default=1.0, ge=0, le=3.0)
     audio_workers: int = Field(default=4, ge=1, le=8)
     tts_batch_size: int = Field(default=4, ge=1, le=4)
+    tts_idle_minutes: int = Field(default=10, ge=0, le=60)
     separation_model: str = "models/demucs"
     preview_encoder: str = "auto"
 

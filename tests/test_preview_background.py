@@ -101,7 +101,7 @@ def test_automatic_reference_subtracts_background_instead_of_adding_it(tmp_path,
     write_stereo(folder / "source.media", bed + voice[:,None]); write_stereo(folder / "bed.wav", bed)
     rows = [dict(id=1, start=0, end=4, text="sample", zh="sample", speaker="speaker_1")]
     store.update(p["id"], media={"duration": 4}, segments=rows)
-    monkeypatch.setattr("app.pipeline.original_background", lambda *_: (folder / "bed.wav", "known"))
+    monkeypatch.setattr("app.pipeline.original_background", lambda *_, **_kw: (folder / "bed.wav", "known"))
     pipeline = Pipeline(store)
     try: refs = pipeline.references(p["id"], Settings(), threading.Event())
     finally: pipeline.close()

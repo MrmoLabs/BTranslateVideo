@@ -131,13 +131,13 @@ def native_batch(model, clips):
         os.replace(pending, clip["output"])
 
 
-def run_clips(model, clips, batch_size=1, stats_path=None, progress_path=None, model_load_seconds=0):
+def run_clips(model, clips, batch_size=1, stats_path=None, progress_path=None, model_load_seconds=0, model_reused=False):
     import torch
     requested=max(1,min(4,int(batch_size)));cap=requested
     pending=deque(c for group in groups(clips,requested) for c in group)
     started=time.perf_counter();times={};history=[];fallback=0;batches=0;done=0;actual=0;reason='';maximum=0;single_output=None;last_fallback=''
     def publish(phase):
-        value=dict(phase=phase,instances=1,completed=done,total=len(clips),requested_batch=requested,actual_batch=actual,max_actual_batch=maximum,
+        value=dict(phase=phase,instances=1,model_reused=model_reused,worker_pid=os.getpid(),completed=done,total=len(clips),requested_batch=requested,actual_batch=actual,max_actual_batch=maximum,
             fallback_reason=reason,last_fallback_reason=last_fallback,model_load_seconds=round(model_load_seconds,2),seconds=round(time.perf_counter()-started,2),stage_seconds={k:round(v,3) for k,v in times.items()},native_batches=batches,fallback_batches=fallback,
             peak_allocated_mb=round(torch.cuda.max_memory_allocated()/1024**2))
         report(progress_path,value)

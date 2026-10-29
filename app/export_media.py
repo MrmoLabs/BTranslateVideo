@@ -50,7 +50,7 @@ def archive_current(store, identifier):
                 except OSError: shutil.copy2(source, target / name)
 
 
-def original_background(store, identifier, settings, cancel, progress, env):
+def original_background(store, identifier, settings, cancel, progress, env, before_gpu=None):
     project = store.read(identifier); folder = store.folder(identifier)
     model = resolve(settings.separation_model)
     if not separation_python().is_file() or not all((model / name).is_file() for name in ["manifest.json", "htdemucs.safetensors", "config.json"]):
@@ -76,6 +76,8 @@ def original_background(store, identifier, settings, cancel, progress, env):
                 previous = percent
                 progress(identifier, "background", 10 + percent, f"保留原背景音：已处理 {data['frames'] / 44100:.0f}/{project['media']['duration']:.0f} 秒")
     progress_path.unlink(missing_ok=True)
+    if before_gpu:
+        before_gpu()
     run([separation_python(), ROOT / "scripts" / "separate_worker.py", request_path], folder / "process.log", cancel, env=env, timeout=86400, on_tick=tick)
     check_cancel(cancel)
     if abs(probe(output, settings)["duration"] - project["media"]["duration"]) > .1:
@@ -140,10 +142,10 @@ def preview_existing(store, identifier, settings, cancel, progress):
     progress(identifier, "preview", 100, "页面预览已准备，可以直接播放")
 
 
-def export_project(store, identifier, settings, cancel, progress, env):
+def export_project(store, identifier, settings, cancel, progress, env, before_gpu=None):
     project = store.read(identifier); folder = store.folder(identifier)
     mode = audio_mode(project); bed, bed_identity = None, "none"
-    if mode == "original": bed, bed_identity = original_background(store, identifier, settings, cancel, progress, env)
+    if mode == "original": bed, bed_identity = original_background(store, identifier, settings, cancel, progress, env, before_gpu=before_gpu)
     elif mode == "custom":
         bed = folder / project.get("background", "")
         if not bed.is_file(): raise ValueError("请先上传不含对白的自定义背景音")

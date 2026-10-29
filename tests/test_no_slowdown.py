@@ -32,7 +32,7 @@ def test_short_voice_ends_naturally_and_rest_of_window_is_silent(tmp_path):
 def test_slowed_or_truncated_short_voice_cache_is_rebuilt_without_tts(tmp_path,monkeypatch):
     store=Store(tmp_path/'projects');project=store.create('short','en','course');folder=store.folder(project['id']);(folder/'cache').mkdir();(folder/'reference.wav').write_bytes(b'reference')
     model=tmp_path/'model';model.mkdir();(model/'config.yaml').write_text('model: test',encoding='utf-8')
-    settings=Settings(index_model=str(model));store.update(project['id'],segments=[dict(id=1,start=0,end=4,text='Hello',zh='你好',speaker='speaker_1')],media={'duration':5},references={'speaker_1':'reference.wav'})
+    settings=Settings(index_model=str(model),tts_idle_minutes=0);store.update(project['id'],segments=[dict(id=1,start=0,end=4,text='Hello',zh='你好',speaker='speaker_1')],media={'duration':5},references={'speaker_1':'reference.wav'})
     monkeypatch.setattr('app.pipeline.index_python',lambda _:Path(__file__))
     synthesized=[]
     def tts(args,*_a,**_kw):

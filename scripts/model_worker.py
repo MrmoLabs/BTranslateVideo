@@ -1,4 +1,4 @@
-"""Heavy models live in short-lived subprocesses, releasing GPU memory per stage."""
+"""Offline model workers; TTS optionally stays warm under its parent session."""
 from __future__ import annotations
 
 import argparse
@@ -54,7 +54,7 @@ def asr(request):
     write(request["output"], output)
 
 
-def tts(request):
+def load_tts(request):
     started=time.perf_counter()
     from tts_batch import report
     report(request.get('progress'),dict(phase='加载模型',instances=1,completed=0,total=len(request['clips']),requested_batch=request.get('batch_size',1),actual_batch=0))
@@ -74,9 +74,15 @@ def tts(request):
     else:
         from indextts.infer_v2 import IndexTTS2
         model = IndexTTS2(cfg_path=str(Path(request["model"]) / "config.yaml"), model_dir=request["model"], use_fp16=True, use_cuda_kernel=False, use_deepspeed=False)
+    return model, time.perf_counter()-started
+
+
+def tts(request, model=None, load_seconds=0, reused=False):
+    if model is None:
+        model, load_seconds = load_tts(request)
     if request["version"] == "2.5":
         from tts_batch import run_clips
-        run_clips(model, request["clips"], request.get("batch_size", 1), request.get("stats"), request.get('progress'), time.perf_counter()-started)
+        run_clips(model, request["clips"], request.get("batch_size", 1), request.get("stats"), request.get('progress'), load_seconds, model_reused=reused)
         return
     for i, clip in enumerate(request["clips"], 1):
         sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -91,11 +97,15 @@ def tts(request):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("kind", choices=["asr", "tts"])
+    parser.add_argument("kind", choices=["asr", "tts", "serve"])
     parser.add_argument("request", type=Path)
     args = parser.parse_args()
-    request = json.loads(args.request.read_text(encoding="utf-8"))
     block_network()
+    if args.kind == "serve":
+        from tts_service import serve
+        serve(args.request)
+        sys.exit(0)
+    request = json.loads(args.request.read_text(encoding="utf-8"))
     from filelock import FileLock
     with FileLock(Path(__file__).resolve().parents[1] / "runtime" / "gpu-model.lock", timeout=86400):
         (asr if args.kind == "asr" else tts)(request)

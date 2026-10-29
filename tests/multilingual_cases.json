@@ -1,0 +1,6 @@
+[
+  {"key":"fr_residual_order","language":"fr","mode":"course","text":"Ce n'est qu'après la normalisation que nous ajoutons la connexion résiduelle.","reference":"只有完成归一化后，我们才加入残差连接。"},
+  {"key":"de_partial_negation","language":"de","mode":"course","text":"Nicht alle Werte sind größer als null.","reference":"并非所有值都大于零。"},
+  {"key":"es_file_condition","language":"es","mode":"course","text":"Si el archivo no existe, créalo antes de continuar.","reference":"如果文件不存在，请先创建它，再继续。"},
+  {"key":"ko_input_change","language":"ko","mode":"course","text":"입력이 바뀌면 결과를 다시 확인하세요.","reference":"如果输入发生变化，请再次检查结果。"}
+]

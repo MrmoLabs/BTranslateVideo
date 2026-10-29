@@ -22,6 +22,7 @@ from .export_media import archive_current, invalidate_export, audio_mode, gain
 from .translation_proposals import read_proposal, selected_changes
 from .store import Store
 from .subtitles import parse_srt, validate_segments
+from .languages import SOURCE_LANGUAGES
 
 
 class ImportProject(BaseModel):
@@ -95,6 +96,10 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         if pipeline.busy(identifier):
             raise HTTPException(409, "项目处理中，请等当前阶段完成或取消后再编辑")
 
+    @app.get("/api/languages")
+    def source_languages():
+        return SOURCE_LANGUAGES
+
     @app.get("/api/settings")
     def settings_get():
         return load_settings().model_dump()
@@ -111,6 +116,20 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             raise HTTPException(409, "此实例不支持远程退出")
         callback()
         return {"shutting_down": True}
+
+    @app.get('/api/tts-session')
+    def tts_session():
+        return pipeline.tts.status()
+
+    @app.post('/api/tts-session/release')
+    def release_tts_session():
+        if pipeline.events:
+            raise HTTPException(409, '配音模型正在工作，请先完成或取消当前任务')
+        try:
+            pipeline.tts.release(blocking=False)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return pipeline.tts.status()
 
     @app.get("/api/diagnostics")
     def environment():
@@ -133,7 +152,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         return data
 
     def initialize(path: Path, name, language, mode, upload=None):
-        if language not in {"en", "ja", ""} or mode not in {"course", "anime"}:
+        if language not in SOURCE_LANGUAGES or mode not in {"course", "anime"}:
             raise ValueError("无效的语言或内容类型")
         settings = load_settings()
         if upload is None:
