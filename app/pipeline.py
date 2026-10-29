@@ -21,6 +21,7 @@ from .translation import local_translator, translate_batch
 from .translation_quality import translation_batches, translation_context
 from .translation_proposals import generate_proposal
 from .emotions import emotion_fields
+from .tts_session import TTSSession
 
 WORKER = ROOT / "scripts" / "model_worker.py"
 
@@ -81,6 +82,7 @@ class Pipeline:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dubbing")
         self.events: dict[str, threading.Event] = {}
         self.lock = threading.RLock()
+        self.tts = TTSSession()
 
     def busy(self, identifier):
         return identifier in self.events
@@ -106,6 +108,7 @@ class Pipeline:
         with self.lock:
             for event in self.events.values():
                 event.set()
+        self.tts.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def progress(self, identifier, stage, percent, message):
@@ -129,6 +132,7 @@ class Pipeline:
             if stage in {"export", "all"}:
                 self.export(identifier, settings, cancel)
             if stage == "optimize":
+                self.tts.release("为译文优化释放显存")
                 generate_proposal(self.store, identifier, settings, cancel, self.progress)
             if stage == "preview":
                 self.preview(identifier, settings, cancel)
@@ -188,10 +192,12 @@ class Pipeline:
         if not cached:
             request = dict(model=str(model), audio=str(audio), language=project["language"], mode=project["mode"], device=settings.asr_device, compute_type=settings.asr_compute_type, output=str(raw_path))
             atomic_json(folder / "cache" / "asr-request.json", request)
+            self.tts.release("为语音识别释放显存")
             run([sys.executable, WORKER, "asr", folder / "cache" / "asr-request.json"], folder / "process.log", cancel, env=offline_env())
             atomic_json(meta_path, metadata)
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
         self.progress(identifier, stage, 40, "本地模型恢复完整句子，校验全部原词与时间轴")
+        self.tts.release("为本地翻译释放显存")
         with local_translator(settings, folder / "process.log", cancel) as url:
             segments = semantic_segments(raw, project["media"]["duration"], url, settings, project["mode"], cancel, folder / "cache", lambda done, total: self.progress(identifier, stage, 40 + round(done / total * 55), f"语义断句 {done}/{total} 词"))
         segments = validate_segments(segments, project["media"]["duration"])
@@ -211,6 +217,7 @@ class Pipeline:
             self.store.log(identifier, "已有全部中文译文，保留校对结果")
             return
         self.progress(identifier, "translate", 5, "载入本地翻译模型；已完成译文将被保留")
+        self.tts.release("为本地翻译释放显存")
         with local_translator(settings, self.store.folder(identifier) / "process.log", cancel) as url:
             completed = 0
             for indices in translation_batches(segments, pending, settings.translation_batch):
@@ -252,7 +259,7 @@ class Pipeline:
             path = f"reference-{speaker}.wav"
             duration = min(10, selected["end"] - selected["start"])
             if audio_mode(project) == "original":
-                bed, _ = original_background(self.store, identifier, settings, cancel, self.progress, offline_env())
+                bed, _ = original_background(self.store, identifier, settings, cancel, self.progress, offline_env(), before_gpu=lambda: self.tts.release("为背景分离释放显存"))
                 ffmpeg(settings, ["-ss", str(selected["start"]), "-t", str(duration), "-i", str(folder / "source.media"), "-ss", str(selected["start"]), "-t", str(duration), "-i", str(bed), "-filter_complex", "[1:a]aeval='-val(0)|-val(1)'[inverse];[0:a][inverse]amix=inputs=2:duration=shortest:normalize=0[voice]", "-map", "[voice]", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(folder / path)], folder / "process.log", cancel)
                 self.store.log(identifier, "已从分离对白提取干净参考声音，减少背景音乐对音色克隆的干扰")
             else:
@@ -265,7 +272,7 @@ class Pipeline:
     def synthesize(self,identifier,pending,total,settings,cancel,stage='dub'):
         folder=self.store.folder(identifier)
         if pending:
-            self.progress(identifier, stage, 5, f"载入 IndexTTS；生成 {len(pending)} 段，复用 {total - len(pending)} 段")
+            self.progress(identifier, stage, 5, f"准备或复用 IndexTTS；生成 {len(pending)} 段，复用 {total - len(pending)} 段")
             tts_progress=folder/'cache'/'tts-progress.json'
             tts_progress.unlink(missing_ok=True)
             request = dict(index_root=str(resolve(settings.index_root)), model=str(resolve(settings.index_model)), version=settings.index_version, clips=pending, batch_size=settings.tts_batch_size,progress=str(tts_progress),stats=str(folder/'cache'/'tts-stats.json'))
@@ -284,7 +291,13 @@ class Pipeline:
                 if count != completed:
                     completed = count
                     self.progress(identifier, stage, 5 + round(count / len(pending) * 45), f"IndexTTS 已生成 {count}/{len(pending)} 段")
-            run([index_python(settings), WORKER, "tts", folder / "cache" / "tts-request.json"], folder / "process.log", cancel, cwd=resolve(settings.index_root), env=offline_env(), on_tick=synthesis_progress)
+            if settings.tts_idle_minutes:
+                self.tts.run(folder/'cache'/'tts-request.json', index_python(settings), WORKER,
+                             folder/'process.log', cancel, offline_env(), settings.tts_idle_minutes*60,
+                             on_tick=synthesis_progress)
+            else:
+                self.tts.release('已选择每次释放模型')
+                run([index_python(settings), WORKER, "tts", folder / "cache" / "tts-request.json"], folder / "process.log", cancel, cwd=resolve(settings.index_root), env=offline_env(), on_tick=synthesis_progress)
         else:
             self.store.update(identifier,tts_runtime=dict(phase='全部复用缓存',instances=0,completed=0,total=0,reused=total,requested_batch=settings.tts_batch_size,actual_batch=0))
 
@@ -403,7 +416,7 @@ class Pipeline:
         if project["dub_signature"] != dub_signature(project, folder, settings):
             raise ValueError("配音设置、模型或参考声音已变化，请重新生成中文配音后导出")
         self.write_subtitles(identifier)
-        export_project(self.store, identifier, settings, cancel, self.progress, offline_env())
+        export_project(self.store, identifier, settings, cancel, self.progress, offline_env(), before_gpu=lambda: self.tts.release("为背景分离释放显存"))
 
     def preview(self, identifier, settings, cancel):
         self.write_subtitles(identifier)

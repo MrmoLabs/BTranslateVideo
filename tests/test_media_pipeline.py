@@ -15,7 +15,7 @@ from app.store import Store
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg required")
 def test_real_media_export_and_voice_cache_invalidation(tmp_path, monkeypatch):
-    settings = Settings(max_speed=1.35, preview_encoder="cpu")
+    settings = Settings(max_speed=1.35, preview_encoder="cpu", tts_idle_minutes=0)
     store = Store(tmp_path / "projects")
     project = store.create("integration", "en", "course")
     identifier = project["id"]

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Keep IndexTTS warm across auditions with idle expiry, manual release and GPU-stage handoff.
+- Add Simplified Chinese / English UI switching with draft preservation.
+- Expand source language selection to 12 languages plus auto-detection; target remains Chinese.
+- Preserve old segmentation caches and expand lifecycle/localization regression checks.
+
 ## 0.1.0 — initial public source release
 
 - Local English/Japanese transcription, context-aware Chinese translation and editable review proposals.

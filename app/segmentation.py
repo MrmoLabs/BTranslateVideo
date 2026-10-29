@@ -16,7 +16,7 @@ from .config import Settings, atomic_json
 from .media import check_cancel
 from .translation import _post_cancellable
 
-VERSION = 9
+VERSION = 10
 PUNCTUATION = {".", "?", "!", ",", "…", "。", "？", "！", "，"}
 DANGLING = {"a", "an", "the", "our", "your", "my", "their", "of", "into", "because", "which", "and", "or"}
 FILLERS = {"okay", "ok", "so", "well", "first", "lets", "let's"}
@@ -274,7 +274,7 @@ def parse_proposals(content, words, mode="course", repair=False):
 
 def plan_block(url, settings, words, context, mode, cancel, trace=None):
     system = (
-        "Restore punctuation in an English or Japanese transcript and split it into natural complete utterances. "
+        "Restore punctuation in a multilingual transcript in its original language and split it into natural complete utterances. "
         "Each sentences array entry must express a complete thought; short connected sentences may stay together. "
         "Long sentences may split at a natural clause boundary, at most 36 seconds per entry. "
         "Never split 'our first file', 'input embeddings', or a preposition from its object. "
@@ -347,7 +347,7 @@ def semantic_segments(raw, duration, url, settings, mode, cancel, cache: Path, p
         # Completed V6-V8 windows were source-validated too. Validate them
         # again before reuse, and retry planning if a cached plan is obsolete.
         cuts = None
-        for version in (VERSION, 8, 7, 6):
+        for version in (VERSION, 9, 8, 7, 6):
             candidate_key = hashlib.sha256(json.dumps([version, window, mode, settings.translation_model, settings.translation_name], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
             candidate = cache / ("sentences-" + candidate_key + ".json")
             if candidate.is_file():

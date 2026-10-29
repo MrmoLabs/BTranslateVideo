@@ -21,5 +21,6 @@
   "translation_batch": 6,
   "translation_review": "auto",
   "translation_compact": true,
-  "glossary": ""
+  "glossary": "",
+  "tts_idle_minutes": 10
 }

@@ -205,7 +205,7 @@ def test_existing_v6_cache_is_validated_and_reused(tmp_path, monkeypatch):
     monkeypatch.setattr("app.segmentation.plan_block", lambda *_: pytest.fail("must reuse validated cache"))
     result = semantic_segments(raw_words("keep all words"), 20, "unused", settings, "course", Event(), tmp_path)
     assert result[0]["text"] == "Keep all words."
-    assert VERSION == 9
+    assert VERSION == 10
     assert len(list(tmp_path.glob("sentences-*.json"))) == 2
 
 

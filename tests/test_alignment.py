@@ -66,7 +66,7 @@ def test_ready_pcm_copy_preserves_every_sample_without_ffmpeg(tmp_path, monkeypa
 
 
 def test_parallel_fits_keep_source_order_deduplicate_tts_and_reuse_cache(tmp_path, monkeypatch):
-    settings = Settings(audio_workers=3)
+    settings = Settings(audio_workers=3, tts_idle_minutes=0)
     store = Store(tmp_path / "projects"); p = store.create("parallel", "en", "course"); folder = store.folder(p["id"])
     (folder / "cache").mkdir(); (folder / "reference.wav").write_bytes(b"reference")
     model = tmp_path / "model"; model.mkdir(); (model / "config.yaml").write_text("test: true", encoding="utf-8")
