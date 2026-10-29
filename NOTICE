@@ -1,0 +1,26 @@
+BTranslateVideo
+Copyright (c) 2026 MrmoLabs
+
+The MIT license in LICENSE applies to original BTranslateVideo application
+code and documentation, except where a file has a different license notice.
+
+scripts/tts_batch.py adapts the IndexTTS-2.5 inference pipeline, including
+token preparation, emotion conditioning, speech-code generation, acoustic
+decoding and vocoder processing. That file is distributed under the bilibili
+Model Use License Agreement, NOT under this project's MIT license.
+Upstream: https://github.com/index-tts/index-tts
+Source revision: d9e41aac89fd00b3d71497fddb287b7f24613712
+Upstream file: indextts/infer_v2_5.py
+Changes: batching, condition grouping, scheduling, progress and safe fallback.
+The upstream license is reproduced in LICENSES/IndexTTS.txt.
+
+Any modifications made to the original model in this Derivative Work are not
+endorsed, warranted, or guaranteed by the original right-holder of the original
+model, and the original right-holder disclaims all liability related to this
+Derivative Work.
+
+Downloaded IndexTTS code and weights, other models, Python packages and media
+tools retain their own licenses. They are not included in this source repository.
+See THIRD_PARTY_NOTICES.md. The MIT grant does not relicense those components
+or confer rights in input videos, reference voices or generated media.
+This project is independent and is not affiliated with or endorsed by bilibili.

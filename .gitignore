@@ -1,0 +1,56 @@
+# Local inputs, models, outputs and installation state
+/Data/
+/data/
+/projects/
+/models/
+/runtime/
+/vendor/
+/settings.local.json
+
+# Environments, build products and caches
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+build/
+dist/
+*.egg-info/
+.cache/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Media and weights must not accidentally enter source commits
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.wav
+*.flac
+*.mp3
+*.gguf
+*.pth
+*.pt
+*.safetensors
+*.onnx
+*.zip
+*.7z
+
+# Machine-specific historical acceptance diary (kept locally)
+/ACCEPTANCE.md

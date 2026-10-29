@@ -1,0 +1,19 @@
+name: Feature request / 功能建议
+description: 描述需要解决的实际场景
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的场景与问题
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期望的操作和结果
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 当前替代方案与其他限制

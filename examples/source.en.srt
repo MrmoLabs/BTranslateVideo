@@ -1,0 +1,7 @@
+1
+00:00:00,000 --> 00:00:04,000
+Welcome. Today we will build a small example together.
+
+2
+00:00:04,000 --> 00:00:08,000
+If the input changes, check the result again.

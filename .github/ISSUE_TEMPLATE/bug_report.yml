@@ -1,0 +1,42 @@
+name: Bug report / 问题反馈
+description: 安装、处理失败或界面问题
+body:
+  - type: markdown
+    attributes:
+      value: 请勿上传私有视频、参考录音、完整日志或凭据。安全漏洞请查看 SECURITY.md。
+  - type: input
+    id: version
+    attributes:
+      label: Commit / 版本
+      placeholder: git rev-parse --short HEAD
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 系统与硬件
+      description: Windows 版本、显卡/显存、内存、uv 版本。
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 发生阶段
+      options:
+        - 安装与下载
+        - 识别与断句
+        - 翻译与优化
+        - 试听与配音
+        - 背景与导出
+        - 页面操作
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤、预期和实际表现
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: 已去除私人信息的错误片段
+      render: text

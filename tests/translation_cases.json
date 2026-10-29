@@ -1,0 +1,97 @@
+[
+  {
+    "key": "only_condition",
+    "language": "en",
+    "mode": "course",
+    "text": "Only when the file has been saved can you close the window.",
+    "reference": "文件保存后，才能关闭窗口。"
+  },
+  {
+    "key": "not_until",
+    "language": "en",
+    "mode": "course",
+    "text": "Not until the data is normalized should we train the model.",
+    "reference": "先对数据归一化，再训练模型。"
+  },
+  {
+    "key": "partial_negation",
+    "language": "en",
+    "mode": "course",
+    "text": "Not every layer uses the same weights.",
+    "reference": "并非每一层都使用相同的权重。"
+  },
+  {
+    "key": "rarely_inversion",
+    "language": "en",
+    "mode": "course",
+    "text": "Rarely does this error occur when the cache is disabled.",
+    "reference": "关闭缓存后，这种错误很少发生。"
+  },
+  {
+    "key": "passive_relative",
+    "language": "en",
+    "mode": "course",
+    "text": "The values that the encoder produces are consumed by the decoder.",
+    "reference": "编码器生成的数值会被解码器使用。"
+  },
+  {
+    "key": "unless_negation",
+    "language": "en",
+    "mode": "course",
+    "text": "Unless both inputs have the same shape, do not add them.",
+    "reference": "只有两个输入的形状相同，才能将它们相加。"
+  },
+  {
+    "key": "matrix_direction",
+    "language": "en",
+    "mode": "course",
+    "text": "Multiply Q by the transpose of K, not K by the transpose of Q.",
+    "reference": "用Q乘以K的转置，而不是用K乘以Q的转置。"
+  },
+  {
+    "key": "comparison_scope",
+    "language": "en",
+    "mode": "course",
+    "text": "The temperature must be at least 20 degrees, not at most 20 degrees.",
+    "reference": "温度必须至少为20度，而不是最多20度。"
+  },
+  {
+    "key": "ja_partial_negation",
+    "language": "ja",
+    "mode": "anime",
+    "text": "全員が反対しているわけではない。",
+    "reference": "并不是所有人都反对。"
+  },
+  {
+    "key": "ja_condition",
+    "language": "ja",
+    "mode": "anime",
+    "text": "鍵が見つからなければ、先に進めない。",
+    "reference": "找不到钥匙，就没法继续前进。"
+  },
+  {
+    "key": "ja_uncertainty",
+    "language": "ja",
+    "mode": "anime",
+    "text": "彼が来るとは限らないから、待たなくてもいい。",
+    "reference": "他不一定会来，所以不用等。"
+  },
+  {
+    "key": "ja_reference",
+    "language": "ja",
+    "mode": "anime",
+    "text": "渡してくれた資料、まだ読んでないんだ。",
+    "reference": "你给我的资料，我还没看。",
+    "context": [
+      {
+        "id": 90,
+        "start": 0,
+        "end": 3,
+        "text": "昨日、君に資料を渡したよ。",
+        "zh": "我昨天给了你资料。",
+        "speaker": "speaker_2",
+        "position": "before"
+      }
+    ]
+  }
+]

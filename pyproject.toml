@@ -1,0 +1,34 @@
+[project]
+name = "btranslatevideo"
+version = "0.1.0"
+description = "Local English/Japanese video translation and Chinese voice dubbing"
+readme = "README.md"
+authors = [{name = "MrmoLabs"}]
+license = "MIT AND LicenseRef-Bilibili-Model-Use"
+license-files = ["LICENSE", "LICENSES/*", "NOTICE"]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "python-multipart>=0.0.20,<1",
+  "httpx[socks]>=0.28,<1",
+  "numpy>=2,<3",
+  "faster-whisper>=1.2,<2",
+  "huggingface-hub>=0.34,<2",
+  "filelock>=3.15,<5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[project.optional-dependencies]
+cuda = ["nvidia-cublas-cu12>=12.8,<13", "nvidia-cudnn-cu12>=9,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[project.urls]
+Homepage = "https://github.com/MrmoLabs/BTranslateVideo"
+Issues = "https://github.com/MrmoLabs/BTranslateVideo/issues"
+Documentation = "https://github.com/MrmoLabs/BTranslateVideo/tree/main/docs"
