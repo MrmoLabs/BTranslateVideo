@@ -131,3 +131,44 @@ def test_status_tolerates_idle_release_during_poll(tmp_path):
     session.process=SimpleNamespace(pid=123,poll=poll)
     assert session.status()["pid"]==123
     session.close()
+
+
+def test_early_idle_callback_retries_and_stale_callback_preserves_new_session(session, tmp_path, monkeypatch):
+    timers = []
+
+    class ManualTimer:
+        def __init__(self, interval, function, args=()):
+            self.interval, self.function, self.args = interval, function, args
+            timers.append(self)
+
+        def start(self):
+            pass
+
+        def cancel(self):
+            pass
+
+        def fire(self):
+            self.function(*self.args)
+
+    monkeypatch.setattr('app.tts_session.threading.Timer', ManualTimer)
+    now = [100.0]
+    session.clock = lambda: now[0]
+    request(tmp_path)
+    run(session, tmp_path, idle=10)
+    now[0] = 109.999
+    timers[-1].fire()
+    assert session.status()['alive'] and len(timers) == 2
+    assert timers[-1].interval == pytest.approx(.01)
+    previous_timer = timers[-1]
+
+    run(session, tmp_path, idle=20)
+    current_timer = timers[-1]
+    now[0] = 110.0
+    previous_timer.fire()
+    assert session.status()['alive'] and len(timers) == 3
+    assert session.timer is current_timer
+
+    now[0] = session.deadline
+    current_timer.fire()
+    assert not session.status()['alive']
+    assert session.status()['reason'] == '空闲保温已到期，自动释放显存'
