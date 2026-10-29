@@ -84,10 +84,22 @@ class TTSSession:
             self.closed = True
             self._stop('应用已关闭')
 
-    def _expire(self):
+    def _schedule_expiry(self):
+        # Timer waits can finish before the monotonic deadline on Windows.
+        self.timer = threading.Timer(max(.01, self.deadline-self.clock()),
+                                     self._expire, args=(self.deadline,))
+        self.timer.daemon = True
+        self.timer.start()
+
+    def _expire(self, deadline):
         with self.guard:
-            if not self.running and self.process and self.clock() >= self.deadline:
+            # Ignore a cancelled callback that waited behind a newer task.
+            if self.running or not self.process or deadline != self.deadline:
+                return
+            if self.clock() >= deadline:
                 self._stop('空闲保温已到期，自动释放显存')
+            else:
+                self._schedule_expiry()
 
     def run(self, request_path, python, worker, log_path, cancel, env, idle_seconds, on_tick=None):
         with self.guard:
@@ -162,6 +174,4 @@ class TTSSession:
             if idle_seconds <= 0:
                 self._stop('已按设置在任务后释放')
             else:
-                self.timer = threading.Timer(idle_seconds, self._expire)
-                self.timer.daemon = True
-                self.timer.start()
+                self._schedule_expiry()

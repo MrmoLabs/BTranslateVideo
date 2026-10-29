@@ -15,6 +15,14 @@ python scripts/check_repository.py
 
 安装 Git、uv、Node.js（仅用于 JavaScript 语法检查）和 FFmpeg/FFprobe。单元与媒体回归无需模型和 GPU。完整推理见安装指南。没有前端打包步骤，静态文件直接由 FastAPI 提供。
 
+## 仓库维护 / Repository maintenance
+
+`main` 是唯一长期保留的分支。维护者的功能和修复使用临时分支提交 PR；检查通过并合并后删除分支。主分支保留保护规则，不需要额外维护 `develop` 分支。
+
+GitHub Actions 依赖每月检查一次，集中到一个 Dependabot PR，最多同时保留一个自动更新 PR。检查通过后再合并；自动更新不代表自动合并。
+
+Keep `main` as the only permanent branch. Use temporary branches for changes, merge through a PR after required checks pass, and delete merged branches. Monthly GitHub Actions dependency updates are grouped into at most one open Dependabot PR and still require a merge decision.
+
 ## 提交方式
 
 Fork → 新建功能分支 → 提交变更 → 向本仓库 `main` 提交 PR。一次 PR 聚焦一个问题；说明触发场景、行为变化、验证结果和未验证范围。不要把私人项目、参考音、模型、输出或本地设置加入提交。
