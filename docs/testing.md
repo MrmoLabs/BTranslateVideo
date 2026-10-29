@@ -5,7 +5,7 @@
 `uv sync --locked --group dev` 后执行：
 
 ```powershell
-uv run --no-sync pytest -q --basetemp runtime/pytest-temp
+uv run --no-sync pytest -q
 python scripts/check_repository.py
 node --check app/static/app.js
 ```

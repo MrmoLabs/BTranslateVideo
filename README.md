@@ -66,7 +66,7 @@ uv --version
 
 ```powershell
 uv sync --locked --group dev
-uv run --no-sync pytest -q --basetemp runtime/pytest-temp
+uv run --no-sync pytest -q
 python scripts/check_repository.py
 ```
 

@@ -8,7 +8,7 @@
 git clone https://github.com/你的账号/BTranslateVideo.git
 cd BTranslateVideo
 uv sync --locked --group dev
-uv run --no-sync pytest -q --basetemp runtime/pytest-temp
+uv run --no-sync pytest -q
 node --check app/static/app.js
 python scripts/check_repository.py
 ```

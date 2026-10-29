@@ -48,4 +48,4 @@ jobs:
           uv run --no-sync python scripts/check_repository.py
           node --check app/static/app.js
       - name: Run CPU and real-media regression tests
-        run: uv run --no-sync pytest -q --basetemp runtime/pytest-ci
+        run: uv run --no-sync pytest -q
