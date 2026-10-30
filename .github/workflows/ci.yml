@@ -48,6 +48,9 @@ jobs:
           uv run --no-sync python scripts/check_repository.py
           node --check app/static/app.js
           node --check app/static/i18n.js
+          node --check app/static/workspace.js
+          node --check app/static/novels.js
+          node --check app/static/recorder.js
           node tests/check_i18n.cjs
       - name: Run CPU and real-media regression tests
         run: uv run --no-sync pytest -q

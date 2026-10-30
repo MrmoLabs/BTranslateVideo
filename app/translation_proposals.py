@@ -6,6 +6,7 @@ from .config import atomic_json, resolve
 from .media import check_cancel
 from .store import now
 from .subtitles import validate_segments
+from .languages import target_code
 from .translation import local_translator
 from .translation_quality import VERSION, digest, run_workflow, translation_batches, translation_context, risk_reasons
 
@@ -21,8 +22,8 @@ def read_proposal(store, identifier):
 def generate_proposal(store,identifier,settings,cancel,progress):
     project=store.read(identifier); segments=validate_segments(project["segments"],project["media"]["duration"])
     indices=[i for i,r in enumerate(segments) if r["zh"]]
-    if not indices: raise ValueError("请先生成或导入中文译文，再优化已有译文")
-    folder=store.folder(identifier); topic=dict(title=project["name"],language=project["language"],mode=project["mode"])
+    if not indices: raise ValueError("请先生成或导入译文，再优化已有译文")
+    folder=store.folder(identifier); topic=dict(title=project["name"],language=project["language"],target_language=target_code(project),mode=project["mode"])
     model=resolve(settings.translation_model)
     model_id=(str(model),model.stat().st_size,model.stat().st_mtime_ns) if model.is_file() else str(model)
     signature=digest([VERSION,segments,project.get("edit_revision",0),topic,model_id,settings.translation_name,settings.glossary,settings.translation_compact,settings.translation_url])

@@ -58,7 +58,7 @@ def serve(folder):
                 write(message['result'], dict(id=message['id'], ok=True))
             except Exception as exc:
                 traceback.print_exc()
-                write(message['result'], dict(id=message['id'], error=str(exc)[-4000:]))
+                write(message['result'], dict(id=message['id'], error=str(exc)[-4000:] or type(exc).__name__))
                 return  # Do not retain a model with a failed CUDA context.
     finally:
         if acquired:

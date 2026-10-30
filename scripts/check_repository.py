@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PRIVATE_DIRS = {"data", "projects", "models", "runtime", "vendor", ".venv", ".git"}
+PRIVATE_DIRS = {"data", "projects", "voices", "audiobooks", "models", "runtime", "vendor", ".venv", ".git"}
 MEDIA = {".wav", ".flac", ".mp3", ".mp4", ".mkv", ".avi", ".mov", ".webm",
          ".gguf", ".pth", ".pt", ".safetensors", ".onnx", ".bin", ".zip", ".7z"}
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")
@@ -76,7 +76,7 @@ def main():
         raise SystemExit("No tracked/staged source files found; stage an explicit source list first.")
     errors = audit_files(ROOT, names)
     required = {"LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "LICENSES/IndexTTS.txt",
-                "README.md", "README.en.md", "settings.example.json", ".github/workflows/ci.yml"}
+                "README.md", "README.zh-CN.md", "settings.example.json", ".github/workflows/ci.yml"}
     errors += [f"Missing required source file: {p}" for p in sorted(required - set(names))]
     if errors:
         print("\n".join(errors))

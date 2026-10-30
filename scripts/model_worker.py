@@ -68,12 +68,14 @@ def load_tts(request):
     import torch
     if not torch.cuda.is_available():
         raise RuntimeError("配音环境中 CUDA 不可用，请安装 CUDA 版 PyTorch 并检查显卡；当前配置要求 GPU 配音")
-    if request["version"] == "2.5":
-        from indextts.infer_v2_5 import IndexTTS2
-        model = IndexTTS2(cfg_path=str(Path(request["model"]) / "config.yaml"), model_dir=request["model"], use_bf16=True, use_cuda_kernel=False, use_deepspeed=False)
-    else:
-        from indextts.infer_v2 import IndexTTS2
-        model = IndexTTS2(cfg_path=str(Path(request["model"]) / "config.yaml"), model_dir=request["model"], use_fp16=True, use_cuda_kernel=False, use_deepspeed=False)
+    from tts_local_models import local_semantic_loader
+    with local_semantic_loader():
+        if request["version"] == "2.5":
+            from indextts.infer_v2_5 import IndexTTS2
+            model = IndexTTS2(cfg_path=str(Path(request["model"]) / "config.yaml"), model_dir=request["model"], use_bf16=True, use_cuda_kernel=False, use_deepspeed=False)
+        else:
+            from indextts.infer_v2 import IndexTTS2
+            model = IndexTTS2(cfg_path=str(Path(request["model"]) / "config.yaml"), model_dir=request["model"], use_fp16=True, use_cuda_kernel=False, use_deepspeed=False)
     return model, time.perf_counter()-started
 
 
@@ -89,7 +91,7 @@ def tts(request, model=None, load_seconds=0, reused=False):
         from app.emotions import emotion_kwargs
         kwargs = dict(spk_audio_prompt=clip["reference"], text=clip["text"], output_path=clip["output"] + ".pending.wav", verbose=False)
         if request["version"] == "2.5":
-            kwargs["lang"] = "ZH"
+            kwargs["lang"] = clip.get("lang", "ZH").upper()
         model.infer(**kwargs,**emotion_kwargs(clip))
         os.replace(kwargs["output_path"], clip["output"])
         print(f"TTS {i}/{len(request['clips'])} id={clip['id']}", flush=True)

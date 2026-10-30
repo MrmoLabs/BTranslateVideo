@@ -9,6 +9,7 @@ import time
 
 from .config import ROOT, atomic_json, executable, resolve, separation_python
 from .media import check_cancel, ffmpeg, probe, run
+from .languages import target_code, target_files, TARGET_LANGUAGES, ISO_LANGUAGES
 
 
 def key(value):
@@ -36,7 +37,7 @@ def invalidate_export(project):
 
 def archive_current(store, identifier):
     project = store.read(identifier); folder = store.folder(identifier)
-    names = {"result.mkv", "bilingual.srt", "chinese.srt", *project.get("outputs", {}).values()}
+    names = {"result.mkv", "bilingual.srt", *target_files(project).values(), *project.get("outputs", {}).values()}
     if project.get("background"): names.add(project["background"])
     if not (folder / "result.mkv").exists(): return
     target = folder / "history" / str(time.time_ns()); target.mkdir(parents=True)
@@ -54,7 +55,7 @@ def original_background(store, identifier, settings, cancel, progress, env, befo
     project = store.read(identifier); folder = store.folder(identifier)
     model = resolve(settings.separation_model)
     if not separation_python().is_file() or not all((model / name).is_file() for name in ["manifest.json", "htdemucs.safetensors", "config.json"]):
-        raise ValueError("原背景音分离模型尚未准备，请运行 setup.ps1，或选择仅中文配音/自定义背景音")
+        raise ValueError("原背景音分离模型尚未准备，请运行 setup.ps1，或选择仅译制配音/自定义背景音")
     manifest = json.loads((model / "manifest.json").read_text(encoding="utf-8"))
     identity = key(dict(schema=1, source=sha(folder / "source.media"), model=manifest["weights_sha256"], segment=6, overlap=.25, shifts=0))
     output = folder / "cache" / f"background-{identity}.flac"
@@ -98,7 +99,7 @@ def make_preview(store, identifier, source, settings, cancel, progress, signatur
     pending = folder / f"preview-{identity}.pending.mp4"
     for encoder in attempts:
         check_cancel(cancel)
-        progress(identifier, "preview", 70, "生成可在页面播放的中文 MP4 预览")
+        progress(identifier, "preview", 70, "生成可在页面播放的译制 MP4 预览")
         prefix = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if encoder == "cuda" else []
         filters = f"scale_cuda={width}:{height}:format=yuv420p" if encoder == "cuda" else f"scale={width}:{height},format=yuv420p"
         codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "24"] if encoder == "cpu" else ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "25", "-b:v", "0"]
@@ -117,12 +118,12 @@ def make_preview(store, identifier, source, settings, cancel, progress, signatur
                 if percent != previous:
                     previous = percent
                     progress(identifier, "preview", percent, f"页面预览：{seconds:.0f}/{project['media']['duration']:.0f} 秒")
-        arguments = [executable(settings.ffmpeg), "-hide_banner", "-nostdin", "-y", *prefix, "-i", str(source), "-map", "0:v:0", "-map", track, "-sn", "-dn", "-vf", filters, *codec, "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "48000", "-movflags", "+faststart", "-progress", str(progress_path), "-nostats", str(pending)]
+        arguments = [executable(settings.ffmpeg), "-hide_banner", "-nostdin", "-y", *prefix, "-i", str(source), "-map", "0:v:0", "-map", track, "-sn", "-dn", "-vf", filters, *codec, "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "48000", "-metadata:s:a:0", "language="+ISO_LANGUAGES[target_code(project)], "-movflags", "+faststart", "-progress", str(progress_path), "-nostats", str(pending)]
         try:
             run(arguments, folder / "process.log", cancel, on_tick=tick, timeout=86400)
             preview = probe(pending, settings)
             if abs(preview["duration"] - info["duration"]) > .2: raise ValueError("预览时长不匹配")
-            if len([x for x in preview["streams"] if x["codec_type"] == "audio"]) != 1: raise ValueError("页面预览必须只有中文音轨")
+            if len([x for x in preview["streams"] if x["codec_type"] == "audio"]) != 1: raise ValueError("页面预览必须只有译制音轨")
             os.replace(pending, output)
             return name, dict(signature=identity, encoder=encoder, width=width, height=height, generated_at=time.time_ns())
         except RuntimeError:
@@ -152,26 +153,26 @@ def export_project(store, identifier, settings, cancel, progress, env, before_gp
         bed_identity = sha(bed)
     elif mode != "none": raise ValueError("无效背景声音模式")
     signature = key(dict(schema=1, dub=project["dub_signature"], source=sha(folder / "source.media"), mode=mode, bed=bed_identity, gain=gain(project)))
-    audio = folder / "chinese.wav"
+    audio = folder / target_files(project)["audio"]
     mixed = None
     if bed is not None:
         mixed = folder / f"mix-{signature}.flac"
         if not mixed.is_file():
-            progress(identifier, "export", 55, "混合中文对白与背景音，保持背景立体声与原时间轴")
+            progress(identifier, "export", 55, "混合译制对白与背景音，保持背景立体声与原时间轴")
             temporary = folder / f"mix-{signature}.pending.flac"
             ffmpeg(settings, ["-i", str(audio), "-i", str(bed), "-filter_complex", f"[0:a]aformat=sample_rates=44100:channel_layouts=stereo[voice];[1:a]volume={gain(project):.5f}[bed];[voice][bed]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=0:latency=1[a]", "-map", "[a]", "-c:a", "flac", str(temporary)], folder / "process.log", cancel)
             os.replace(temporary, mixed)
         audio = mixed
-    progress(identifier, "export", 60, "封装原画面、原音轨、含背景中文音轨与双语字幕")
+    progress(identifier, "export", 60, "封装原画面、原音轨、含背景译制音轨与双语字幕")
     temporary = folder / f"result-{signature}.pending.mkv"
-    ffmpeg(settings, ["-i", str(folder / "source.media"), "-i", str(audio), "-i", str(folder / "bilingual.srt"), "-map", "0:v:0", "-map", "0:a:0", "-map", "1:a:0", "-map", "2:s:0", "-map_metadata", "0", "-c:v", "copy", "-c:a:0", "copy", "-c:a:1", "aac", "-b:a:1", "160k", "-c:s", "srt", "-metadata:s:a:0", "title=原始音轨", "-metadata:s:a:0", "language=" + {"en": "eng", "ja": "jpn"}.get(project["language"], "und"), "-metadata:s:a:1", "title=中文配音与背景音" if bed else "title=中文配音", "-metadata:s:a:1", "language=zho", "-disposition:a:0", "0", "-disposition:a:1", "default", "-metadata:s:s:0", "title=双语字幕", "-metadata:s:s:0", "language=zho", "-disposition:s:0", "default", str(temporary)], folder / "process.log", cancel)
+    ffmpeg(settings, ["-i", str(folder / "source.media"), "-i", str(audio), "-i", str(folder / "bilingual.srt"), "-map", "0:v:0", "-map", "0:a:0", "-map", "1:a:0", "-map", "2:s:0", "-map_metadata", "0", "-c:v", "copy", "-c:a:0", "copy", "-c:a:1", "aac", "-b:a:1", "160k", "-c:s", "srt", "-metadata:s:a:0", "title=原始音轨", "-metadata:s:a:0", "language=" + ISO_LANGUAGES.get(project["language"], "und"), "-metadata:s:a:1", "title="+TARGET_LANGUAGES[target_code(project)]+("配音与背景音" if bed else "配音"), "-metadata:s:a:1", "language="+ISO_LANGUAGES[target_code(project)], "-disposition:a:0", "0", "-disposition:a:1", "default", "-metadata:s:s:0", "title=双语字幕", "-metadata:s:s:0", "language="+ISO_LANGUAGES[target_code(project)], "-disposition:s:0", "default", str(temporary)], folder / "process.log", cancel)
     info = probe(temporary, settings)
     if len([x for x in info["streams"] if x["codec_type"] == "audio"]) != 2: raise ValueError("导出结果缺少双音轨")
     name, preview = make_preview(store, identifier, temporary, settings, cancel, progress, signature)
     check_cancel(cancel)
     archive_current(store, identifier)
     os.replace(temporary, folder / "result.mkv")
-    outputs = dict(audio="chinese.wav", video="result.mkv", preview=name, subtitles="bilingual.srt", chinese_subtitles="chinese.srt")
+    outputs = dict(audio=target_files(project)["audio"], video="result.mkv", preview=name, subtitles="bilingual.srt", **{("chinese_subtitles" if target_code(project)=="zh" else "target_subtitles"):target_files(project)["subtitles"]})
     if mixed: outputs["mixed_audio"] = mixed.name
     store.update(identifier, outputs=outputs, export_signature=signature, preview_info=preview, export_info=dict(background_mode=mode, background_gain=gain(project), background_model=bed_identity))
-    progress(identifier, "export", 100, "中文成片与页面预览已完成")
+    progress(identifier, "export", 100, "译制成片与页面预览已完成")
