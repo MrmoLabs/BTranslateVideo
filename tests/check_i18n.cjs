@@ -18,3 +18,10 @@ vm.runInContext(`I18N.ready().then(()=>{
   assert.equal(tr('保存校对'),'保存校对');
   console.log('UI locale, persistence, placeholders and user-data isolation: OK');
 }).catch(error=>{console.error(error);throw error;});`,context);
+
+// New workspace controls must have complete English labels as well as valid placeholders.
+const workspaceSource=['workspace.js','novels.js','recorder.js'].map(file=>fs.readFileSync(path.join(root,'app/static',file),'utf8')).join('\n');
+const pageSource=fs.readFileSync(path.join(root,'app/static/index.html'),'utf8');
+for(const match of workspaceSource.matchAll(/tr\('([^']*)'/g))assert.ok(Object.hasOwn(catalog,match[1]),`Missing workspace translation: ${match[1]}`);
+for(const match of pageSource.matchAll(/\bdata-i18n=(["'])(.*?)\1/g))assert.ok(Object.hasOwn(catalog,match[2]),`Missing page translation: ${match[2]}`);
+console.log('Workspace and static page translation coverage: OK');

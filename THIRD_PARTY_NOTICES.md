@@ -32,3 +32,9 @@ IndexTTS 代码与权重有独立使用条件，并非 MIT，也不应将整套�
 ## 数据和项目归属
 
 没有随项目再分发视频、真实音色样本、模型权重或生成音频。示例 SRT 是为本项目编写的合成文本。仓库标识与界面图形由本项目提供，不使用上游商标作为项目标识。本项目与 bilibili/IndexTeam 无隶属或背书关系。
+
+## 录音组件与工作流参考
+
+Windows 本机话筒和系统声音录制使用 [PyAudioWPatch](https://github.com/s0d3s/PyAudioWPatch)（MIT，底层 PortAudio 许可随安装包保留），通过 WASAPI 输入和输出回环采集；包从 PyPI 安装，不将二进制复制进源码仓库。
+
+音色采集的“录音／试听／保存”和小说的“书籍／章节／句子、进度与续跑”交互参考 [Voicebox](https://github.com/jamiepine/voicebox) 的 MIT 开源项目实现思路。当前 `app/recording.py`、`app/audiobooks.py` 及其页面为本项目原创实现，复用本项目已有 IndexTTS 会话，不引入 Voicebox 的桌面运行时或数据库。

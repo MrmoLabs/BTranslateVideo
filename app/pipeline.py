@@ -22,6 +22,7 @@ from .translation_quality import translation_batches, translation_context
 from .translation_proposals import generate_proposal
 from .emotions import emotion_fields
 from .tts_session import TTSSession
+from .languages import target_code, target_files, tts_language
 
 WORKER = ROOT / "scripts" / "model_worker.py"
 
@@ -30,12 +31,13 @@ def fingerprint(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
 
 
-def make_voice_clip(item,folder,reference,settings,model_signature,reference_hash):
+def make_voice_clip(item,folder,reference,settings,model_signature,reference_hash,target_language="zh"):
     config=emotion_fields(item)
     identity=dict(schema=1,text=item['zh'],speaker=item['speaker'],reference=reference_hash,model=str(resolve(settings.index_model)),model_signature=model_signature,version=settings.index_version)
+    if target_code(target_language)!='zh':identity['target_language']=target_language
     if config:identity['expression']=config
     key=fingerprint(identity)
-    return dict(id=item['id'],text=item['zh'],reference=str(folder/reference),output=str(folder/'cache'/('tts-'+key+'.wav')),**config)
+    return dict(id=item['id'],text=item['zh'],reference=str(folder/reference),output=str(folder/'cache'/('tts-'+key+'.wav')),**config,**(dict(lang=target_language.upper()) if target_language!='zh' else {}))
 
 
 def file_hash(path: Path) -> str:
@@ -50,7 +52,9 @@ def dub_signature(project, folder, settings):
     model_dir = resolve(settings.index_model)
     model_signature = sorted((str(p.relative_to(model_dir)), p.stat().st_size, p.stat().st_mtime_ns) for p in model_dir.rglob("*") if p.is_file() and ".cache" not in p.parts)
     refs = {speaker: file_hash(folder / path) for speaker, path in project["references"].items()}
-    return fingerprint(dict(schema=4, alignment_policy='short-original-speed', segments=project["segments"], references=refs, model=str(model_dir), model_signature=model_signature, version=settings.index_version, max_speed=settings.max_speed, max_lead=settings.max_lead, max_lag=settings.max_lag))
+    identity=dict(schema=4, alignment_policy='short-original-speed', segments=project["segments"], references=refs, model=str(model_dir), model_signature=model_signature, version=settings.index_version, max_speed=settings.max_speed, max_lead=settings.max_lead, max_lag=settings.max_lag)
+    if target_code(project)!='zh':identity['target_language']=target_code(project)
+    return fingerprint(identity)
 
 
 def place_start(start, limit, duration, previous_end, settings):
@@ -121,6 +125,7 @@ class Pipeline:
         try:
             check_cancel(cancel)
             self.store.update(identifier, status="running")
+            if stage in {"all","dub","audition"}:tts_language(self.store.read(identifier),settings.index_version)
             if stage == "resegment":
                 self.analyze(identifier, settings, cancel, force=True)
             if stage in {"analyze", "all"}:
@@ -166,10 +171,13 @@ class Pipeline:
         destination.mkdir(parents=True, exist_ok=False)
         project = self.store.read(identifier)
         atomic_json(destination / "project.json", project)
-        for name in {"original.srt", "chinese.srt", "bilingual.srt", "chinese.wav", "result.mkv", *project["references"].values()}:
+        for name in {"original.srt", "bilingual.srt", "result.mkv", *target_files(project).values(), *project.get("outputs",{}).values(), (project.get("audition") or {}).get("file",""), *project["references"].values()}:
             source = folder / name
-            if source.is_file():
-                shutil.copy2(source, destination / name)
+            if source.is_file() and source.parent==folder:
+                if source.suffix in {".srt",".vtt"}:shutil.copy2(source,destination/name)
+                else:
+                    try:os.link(source,destination/name)
+                    except OSError:shutil.copy2(source,destination/name)
         return destination.name
 
     def analyze(self, identifier, settings, cancel, force=False):
@@ -214,7 +222,7 @@ class Pipeline:
         segments = validate_segments(project["segments"], project["media"]["duration"])
         pending = [i for i, item in enumerate(segments) if not item["zh"]]
         if not pending:
-            self.store.log(identifier, "已有全部中文译文，保留校对结果")
+            self.store.log(identifier, "已有全部译文，保留校对结果")
             return
         self.progress(identifier, "translate", 5, "载入本地翻译模型；已完成译文将被保留")
         self.tts.release("为本地翻译释放显存")
@@ -223,7 +231,7 @@ class Pipeline:
             for indices in translation_batches(segments, pending, settings.translation_batch):
                 batch = [segments[i] for i in indices]
                 result = translate_batch(url, settings, batch, translation_context(segments, indices), project["mode"], cancel,
-                    cache=self.store.folder(identifier) / "cache", topic=dict(title=project["name"], language=project["language"], mode=project["mode"]))
+                    cache=self.store.folder(identifier) / "cache", topic=dict(title=project["name"], language=project["language"], target_language=target_code(project), mode=project["mode"]))
                 check_cancel(cancel)
                 for index in indices:
                     segments[index]["zh"] = result[segments[index]["id"]]
@@ -234,12 +242,13 @@ class Pipeline:
 
     def write_subtitles(self, identifier):
         folder = self.store.folder(identifier)
-        segments = self.store.read(identifier)["segments"]
-        for name, language, bilingual in [("original.srt", "text", False), ("chinese.srt", "zh", False), ("bilingual.srt", "zh", True)]:
+        project=self.store.read(identifier);files=target_files(project)
+        segments = project["segments"]
+        for name, language, bilingual in [("original.srt", "text", False), (files["subtitles"], "zh", False), ("bilingual.srt", "zh", True)]:
             (folder / name).write_text(render_srt(segments, language, bilingual), encoding="utf-8", newline="\n")
 
         from .subtitles import render_vtt
-        (folder / "chinese.vtt").write_text(render_vtt(segments), encoding="utf-8", newline="\n")
+        (folder / files["captions"]).write_text(render_vtt(segments), encoding="utf-8", newline="\n")
 
     def references(self, identifier, settings, cancel):
         project = self.store.read(identifier)
@@ -279,15 +288,25 @@ class Pipeline:
             self.store.update(identifier,tts_runtime=dict(phase='等待 GPU',instances=1,completed=0,total=len(pending),reused=total-len(pending),requested_batch=settings.tts_batch_size,actual_batch=0))
             atomic_json(folder / "cache" / "tts-request.json", request)
             completed = -1
+            model_reported = False
             def synthesis_progress():
-                nonlocal completed
+                nonlocal completed, model_reported
                 count = sum(Path(clip["output"]).is_file() for clip in pending)
+                runtime = dict(instances=1, completed=count, total=len(pending),
+                               requested_batch=settings.tts_batch_size, actual_batch=0)
+                if settings.tts_idle_minutes:
+                    runtime.update(self.tts.run_info, phase=self.tts.status()['phase'])
+                    if not model_reported:
+                        message = ('复用已加载模型，无需重新加载' if runtime.get('model_reused')
+                                   else '需要加载配音模型：' + runtime.get('model_load_reason', '尚未加载'))
+                        self.store.log(identifier, message)
+                        model_reported = True
                 if tts_progress.is_file():
                     try:
-                        runtime=json.loads(tts_progress.read_text(encoding='utf-8'))
-                        runtime['reused']=total-len(pending)
-                        self.store.update(identifier,tts_runtime=runtime)
+                        runtime.update(json.loads(tts_progress.read_text(encoding='utf-8')))
                     except (OSError,ValueError): pass
+                runtime['reused']=total-len(pending)
+                self.store.update(identifier,tts_runtime=runtime)
                 if count != completed:
                     completed = count
                     self.progress(identifier, stage, 5 + round(count / len(pending) * 45), f"IndexTTS 已生成 {count}/{len(pending)} 段")
@@ -302,7 +321,7 @@ class Pipeline:
             self.store.update(identifier,tts_runtime=dict(phase='全部复用缓存',instances=0,completed=0,total=0,reused=total,requested_batch=settings.tts_batch_size,actual_batch=0))
 
     def audition(self,identifier,settings,cancel):
-        project=self.store.read(identifier);request=project.get('audition_request')
+        project=self.store.read(identifier);tts_language(project,settings.index_version);request=project.get('audition_request')
         if not request: raise ValueError('请先选择一句生成试听')
         row=validate_segments([request['segment']],project['media']['duration'])[0]
         refs=dict(project['references'])
@@ -310,7 +329,7 @@ class Pipeline:
         if row['speaker'] not in refs: raise ValueError('请先为这个角色上传参考声音')
         folder=self.store.folder(identifier);model=resolve(settings.index_model)
         signature=sorted((str(p.relative_to(model)),p.stat().st_size,p.stat().st_mtime_ns) for p in model.rglob('*') if p.is_file() and '.cache' not in p.parts)
-        clip=make_voice_clip(row,folder,refs[row['speaker']],settings,signature,file_hash(folder/refs[row['speaker']]))
+        clip=make_voice_clip(row,folder,refs[row['speaker']],settings,signature,file_hash(folder/refs[row['speaker']]),target_code(project))
         raw=Path(clip['output']);self.synthesize(identifier,[] if raw.exists() else [clip],1,settings,cancel,'audition')
         check_cancel(cancel)
         if wav_duration(raw)<=0: raise ValueError('试听音频无有效内容')
@@ -322,9 +341,10 @@ class Pipeline:
 
     def dub(self, identifier, settings, cancel):
         project = self.store.read(identifier)
+        tts_language(project,settings.index_version)
         segments = validate_segments(project["segments"], project["media"]["duration"])
         if any(not item["zh"] for item in segments):
-            raise ValueError("请先完成全部中文翻译")
+            raise ValueError("请先完成全部译文")
         if not index_python(settings).is_file():
             raise ValueError("IndexTTS 独立环境未安装，请运行 setup.ps1")
         refs = self.references(identifier, settings, cancel)
@@ -336,7 +356,7 @@ class Pipeline:
         model_signature = sorted((str(p.relative_to(model_dir)), p.stat().st_size, p.stat().st_mtime_ns) for p in model_dir.rglob("*") if p.is_file() and ".cache" not in p.parts)
         hashes = {speaker: file_hash(folder / reference) for speaker, reference in refs.items()}
         for item in segments:
-            clip=make_voice_clip(item,folder,refs[item['speaker']],settings,model_signature,hashes[item['speaker']])
+            clip=make_voice_clip(item,folder,refs[item['speaker']],settings,model_signature,hashes[item['speaker']],target_code(project))
             path=Path(clip['output'])
             clips.append((item, path))
             if not path.exists() and clip["output"] not in pending_outputs:
@@ -400,21 +420,22 @@ class Pipeline:
         if not any(a["end"] > b["start"] + .00001 for a, b in zip(segments, segments[1:])):
             if any(a["end"] > b["start"] + 1 / 24000 + .00001 for a, b in zip(timing, timing[1:])):
                 raise ValueError("实际配音对齐出现新增重叠，未替换音轨，请重新调整时间")
-        target = folder / "chinese.pending.wav"
+        audio_name=target_files(project)["audio"]
+        target = folder / (Path(audio_name).stem+".pending.wav")
         mix_timeline(placed, project["media"]["duration"], target, cancel)
-        os.replace(target, folder / "chinese.wav")
+        os.replace(target, folder / audio_name)
         signature = dub_signature(self.store.read(identifier), folder, settings)
-        self.store.update(identifier, dub_signature=signature, dub_timing=timing, outputs={"audio": "chinese.wav"})
+        self.store.update(identifier, dub_signature=signature, dub_timing=timing, outputs={"audio": audio_name})
         self.write_subtitles(identifier)
-        self.progress(identifier, "dub", 100, "中文音轨生成完成，可试听后导出视频")
+        self.progress(identifier, "dub", 100, "译制音轨生成完成，可试听后导出视频")
 
     def export(self, identifier, settings, cancel):
         project = self.store.read(identifier)
         folder = self.store.folder(identifier)
-        if not project.get("dub_signature") or not (folder / "chinese.wav").exists():
-            raise ValueError("请先生成当前版本的中文配音")
+        if not project.get("dub_signature") or not (folder / target_files(project)["audio"]).exists():
+            raise ValueError("请先生成当前版本的配音")
         if project["dub_signature"] != dub_signature(project, folder, settings):
-            raise ValueError("配音设置、模型或参考声音已变化，请重新生成中文配音后导出")
+            raise ValueError("配音设置、模型或参考声音已变化，请重新生成配音后导出")
         self.write_subtitles(identifier)
         export_project(self.store, identifier, settings, cancel, self.progress, offline_env(), before_gpu=lambda: self.tts.release("为背景分离释放显存"))
 

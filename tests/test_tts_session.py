@@ -27,7 +27,7 @@ for line in sys.stdin:
     time.sleep(r.get('delay',0))
     count+=1
     output=Path(message['result']);tmp=output.with_suffix('.tmp')
-    tmp.write_text(json.dumps(dict(id=message['id'],ok=True)))
+    tmp.write_text(json.dumps(dict(id=message['id'],error='') if r.get('empty_error') else dict(id=message['id'],ok=True)))
     os.replace(tmp,output)
 ''',encoding='utf-8')
     starts=[]
@@ -42,7 +42,7 @@ for line in sys.stdin:
 
 def request(tmp_path,**values):
     path=tmp_path/'request.json'
-    atomic_json(path,dict(index_root=str(tmp_path/'index'),model=str(tmp_path/'model'),version='2.5',clips=[],**values))
+    atomic_json(path,{**dict(index_root=str(tmp_path/'index'),model=str(tmp_path/'model'),version='2.5',clips=[]),**values})
     return path
 
 
@@ -172,3 +172,39 @@ def test_early_idle_callback_retries_and_stale_callback_preserves_new_session(se
     current_timer.fire()
     assert not session.status()['alive']
     assert session.status()['reason'] == '空闲保温已到期，自动释放显存'
+
+
+def test_code_timestamp_changes_preserve_model_but_content_changes_reload(session, tmp_path):
+    import os
+    request(tmp_path)
+    code=tmp_path/'index/indextts/infer_v2_5.py'
+    code.parent.mkdir(parents=True)
+    code.write_bytes(b'first source')
+    run(session,tmp_path)
+    original=code.stat()
+    os.utime(code,ns=(original.st_atime_ns,original.st_mtime_ns+1_000_000_000))
+    run(session,tmp_path)
+    assert len(session.starts)==1 and session.run_info['model_reused']
+    timestamp=code.stat()
+    code.write_bytes(b'other source')
+    os.utime(code,ns=(timestamp.st_atime_ns,timestamp.st_mtime_ns))
+    run(session,tmp_path)
+    assert len(session.starts)==2 and not session.run_info['model_reused']
+    assert session.run_info['model_load_reason']=='模型或运行环境发生变化'
+
+
+def test_emotion_and_text_changes_reuse_model_and_publish_current_phase(session,tmp_path):
+    request(tmp_path,clips=[dict(text='first',emotion='happy')])
+    run(session,tmp_path)
+    request(tmp_path,clips=[dict(text='second',emotion='sad')])
+    states=[]
+    session.run(tmp_path/'request.json',sys.executable,'unused-worker',tmp_path/'log.txt',
+                threading.Event(),dict(os.environ),10,on_tick=lambda:states.append(session.status()['phase']))
+    assert len(session.starts)==1 and session.run_info['model_reused']
+    assert states[0]=='复用已加载模型'
+
+
+def test_empty_worker_error_is_a_failure_and_releases_the_model(session,tmp_path):
+    request(tmp_path,empty_error=True)
+    with pytest.raises(RuntimeError,match='执行失败'):run(session,tmp_path)
+    assert not session.status()['alive']

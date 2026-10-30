@@ -1,7 +1,7 @@
 [project]
 name = "btranslatevideo"
 version = "0.1.0"
-description = "Local multilingual video translation and Chinese voice dubbing"
+description = "Local multilingual video dubbing and chapter-based audiobook narration"
 readme = "README.md"
 authors = [{name = "MrmoLabs"}]
 license = "MIT AND LicenseRef-Bilibili-Model-Use"
@@ -16,6 +16,7 @@ dependencies = [
   "faster-whisper>=1.2,<2",
   "huggingface-hub>=0.34,<2",
   "filelock>=3.15,<5",
+  "pyaudiowpatch>=0.2.12.7,<0.3; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

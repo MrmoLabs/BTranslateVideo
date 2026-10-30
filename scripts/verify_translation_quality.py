@@ -24,7 +24,7 @@ def main():
         for i,case in enumerate(cases,1):
             row=dict(id=i,start=3,end=15,text=case["text"],zh="",speaker="speaker_1");context=case.get("context",[])
             started=time.perf_counter();old=legacy.translate_batch(url,settings,[row],context,case["mode"],cancel)[i] if legacy else None
-            result=run_workflow(url,settings,[row],context,case["mode"],cancel,topic=dict(title="独立语义回归例句，各例句不是连续叙事",language=case["language"]),cache=out/"regression-cache")[i]
+            result=run_workflow(url,settings,[row],context,case["mode"],cancel,topic=dict(title="独立语义回归例句，各例句不是连续叙事",language=case["language"],target_language=case.get("target_language","zh")),cache=out/"regression-cache")[i]
             item=dict(**case,baseline=old,actual=result["zh"],reason=result["reason"],seconds=round(time.perf_counter()-started,3));report["results"].append(item)
             atomic_json(out/"language-regression.json",report);print(json.dumps(item,ensure_ascii=False),flush=True)
     print("Held-out language cases complete. See language-regression.json in the output directory.",flush=True)

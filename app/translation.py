@@ -81,7 +81,7 @@ def parse_translation(content: str, expected: list[int]) -> dict[int, str]:
         raise ValueError("翻译模型未返回 translations 数组")
     result = {}
     for item in items:
-        identifier, text = int(item["id"]), item["zh"]
+        identifier, text = int(item["id"]), item.get("translation", item.get("zh"))
         if identifier in result or not isinstance(text, str) or not text.strip():
             raise ValueError("译文编号重复或内容为空")
         result[identifier] = text.strip()

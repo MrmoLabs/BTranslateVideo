@@ -15,13 +15,15 @@ from .media import check_cancel, stop_process
 
 
 def model_identity(request, python):
-    paths = [Path(python), Path(request['index_root']) / 'indextts/infer_v2_5.py',
+    code_paths = [Path(request['index_root']) / 'indextts/infer_v2_5.py',
              Path(request['index_root']) / 'indextts/infer_v2.py',
-             ROOT / 'scripts/model_worker.py', ROOT / 'scripts/tts_service.py', ROOT / 'scripts/tts_batch.py']
+             ROOT / 'scripts/model_worker.py', ROOT / 'scripts/tts_service.py', ROOT / 'scripts/tts_batch.py', ROOT / 'scripts/tts_local_models.py']
     model = Path(request['model'])
-    paths += sorted(p for p in model.rglob('*') if p.is_file() and '.cache' not in p.parts)
+    paths = [Path(python)] + sorted(p for p in model.rglob('*') if p.is_file() and '.cache' not in p.parts)
     records = [(str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in paths if p.is_file()]
-    return hashlib.sha256(json.dumps([request['index_root'], request['model'], request['version'], str(python), records]).encode()).hexdigest()
+    # Git checkout can rewrite identical scripts. Only code content changes invalidate a warm worker.
+    code = [(str(p), hashlib.sha256(p.read_bytes()).hexdigest()) for p in code_paths if p.is_file()]
+    return hashlib.sha256(json.dumps([request['index_root'], request['model'], request['version'], str(python), records, code]).encode()).hexdigest()
 
 
 class TTSSession:
@@ -37,6 +39,7 @@ class TTSSession:
         self.running = False
         self.closed = False
         self.reason = '尚未加载'
+        self.run_info = {}
 
     def status(self):
         process = self.process
@@ -113,20 +116,24 @@ class TTSSession:
                 self.timer = None
             reused = bool(self.process and self.process.poll() is None and key == self.key)
             if not reused:
-                self._stop('模型或运行环境发生变化')
+                load_reason = ('模型或运行环境发生变化' if self.process and self.process.poll() is None
+                               else '配音模型进程已退出' if self.process else self.reason)
+                self._stop(load_reason)
                 self.folder = self.root / 'runtime/tts-sessions' / uuid.uuid4().hex
                 self.folder.mkdir(parents=True)
                 self.log = (self.folder / 'process.log').open('ab', buffering=0)
                 try:
                     self.process = self.popen([str(python), str(worker), 'serve', str(self.folder)],
                         stdin=subprocess.PIPE, stdout=self.log, stderr=subprocess.STDOUT,
-                        text=True, encoding='utf-8', env={**env, 'PYTHONUNBUFFERED':'1'},
+                        text=True, encoding='utf-8', env={**env, 'PYTHONUNBUFFERED':'1', 'PYTHONFAULTHANDLER':'1'},
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 except BaseException:
                     self._stop('模型进程启动失败')
                     raise
                 self.key = key
+            self.run_info = dict(model_reused=reused, model_load_reason='' if reused else load_reason)
             self.running = True
+            atomic_json(self.folder / 'state.json', dict(phase='复用已加载模型' if reused else '启动配音进程'))
             token = uuid.uuid4().hex
             result_path = self.folder / (token + '.json')
             session_log = self.folder / 'process.log'
@@ -155,11 +162,14 @@ class TTSSession:
                         result = json.loads(result_path.read_text(encoding='utf-8'))
                         if result.get('id') != token:
                             raise RuntimeError('配音会话响应不匹配')
-                        if result.get('error'):
-                            raise RuntimeError(result['error'])
+                        if 'error' in result:
+                            raise RuntimeError(result['error'] or '配音模型执行失败')
+                        if result.get('ok') is not True:
+                            raise RuntimeError('配音模型未返回成功结果')
                         break
-                    if self.process.poll() is not None:
-                        raise RuntimeError('配音模型进程已退出，请重试；已完成片段可复用')
+                    exit_code=self.process.poll()
+                    if exit_code is not None:
+                        raise RuntimeError(f'配音模型进程已退出（代码 {exit_code} / 0x{exit_code & 0xffffffff:08X}），请查看诊断日志；已完成片段可复用')
                     if self.clock()-started > 86400:
                         raise RuntimeError('配音任务超时')
                     cancel.wait(.15)
