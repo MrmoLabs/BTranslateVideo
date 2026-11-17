@@ -1,0 +1,24 @@
+.subtitle-edit-tools{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin:5px 0;font-size:11px}
+.subtitle-edit-tools button{min-height:28px;padding:4px 8px;font-size:11px}
+.subtitle-edit-tools details{margin-left:auto}.subtitle-edit-tools summary{cursor:pointer;color:var(--muted)}
+.human-mark-label{font-size:11px;padding:4px 6px;margin:3px 0}.human-mark-label select{min-height:30px;padding:4px;margin-top:3px}
+.review-human-badge{width:max-content;font-size:10px;background:#edf0ef;color:#62716b}
+body.subtitle-workbench:not(.comfortable-subtitles) .review-cue small{margin-block:3px}
+body.subtitle-workbench:not(.comfortable-subtitles) .review-cue .review-human-badge{margin-top:2px;padding:2px 5px;line-height:1.2}
+.review-human-badge[data-human-status="checked"]{background:#d8eee4;color:#146046}
+.review-human-badge[data-human-status="question"]{background:#fff0d2;color:#8e510f}
+.source-cue-current{outline:1px solid #90b8aa;outline-offset:-1px}
+.subtitle-tools-dialog{width:min(850px,calc(100vw - 32px));max-height:92vh;padding:22px;overflow-y:auto}
+.subtitle-tools-dialog .dialog-heading{padding:0;margin:0 0 12px}.subtitle-tools-dialog h2{font-size:19px}
+.subtitle-tools-dialog p{font-size:12px;line-height:1.6;margin:8px 0}
+.subtitle-tools-dialog canvas{display:block;width:100%;height:128px;border:1px solid var(--line);background:#fafcfb;touch-action:none;cursor:crosshair}
+.subtitle-tools-dialog audio{width:100%;height:34px;margin:8px 0}
+.subtitle-tools-dialog input[type="range"]{width:100%;margin:6px 0}
+.subtitle-tools-dialog textarea{min-height:62px;font-size:13px;cursor:text;resize:vertical}
+.subtitle-tools-dialog .form-grid{margin:10px 0;gap:10px}.subtitle-tools-dialog label{font-size:12px}
+.subtitle-tools-dialog .tool-action-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.subtitle-tools-dialog .tool-action-row label{display:flex;align-items:center;gap:6px;margin:0}.subtitle-tools-dialog .tool-action-row input{width:105px;margin:0}
+.subtitle-tools-dialog .tool-action-row button{font-size:12px;min-height:32px}
+#tools-status{min-height:20px;color:var(--muted)}
+.source-cue-options .source-cue-nav{font-size:11px;min-height:28px;padding:3px 6px}
+@media(max-width:650px){.subtitle-tools-dialog{padding:14px;width:calc(100vw - 16px)}.subtitle-tools-dialog .form-grid{grid-template-columns:1fr}.subtitle-tools-dialog canvas{height:100px}.subtitle-edit-tools details{margin-left:0}.source-cue-options{gap:5px}}

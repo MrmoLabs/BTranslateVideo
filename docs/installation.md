@@ -53,3 +53,13 @@ cd BTranslateVideo
 | 背景仍有人声 | 分离模型的限制；可上传独立背景音，或者选择仅中文配音 |
 
 反馈时附系统、显卡、阶段和去除私人信息的错误片段；不要上传模型、完整日志、参考音或私有视频。
+
+## 可选川渝方言识别
+
+在项目目录执行 `.venv/Scripts/python.exe scripts/prepare_fun_asr.py`，准备独立环境及官方 ModelScope Fun-ASR-Nano / FSMN-VAD 权重。之后在“设置 → 模型与工具 → 语音识别”选择“Fun-ASR-Nano · 川渝方言”，保存设置；导入视频时原声语言选“中文”。准备完成后的识别离线运行。
+
+默认安装 CUDA PyTorch；CPU 可加 `--device cpu`。已有 Python 3.11 CUDA 环境时可加 `--reuse-torch-from runtime/diarization-env`，将匹配的 torch / torchaudio 安装文件复制到 Fun-ASR 独立环境，避免重复下载。不会修改源环境。字段、热词、模型差异和时间戳要求见[模型后端说明](model-backends.md#fun-asr-nano--川渝方言)。
+
+## 可选说话人识别
+
+Community-1 使用独立环境和需用户本人授权的模型，不由默认 setup.ps1 自动下载。安装依赖、下载／导入离线快照及设备配置见[本地说话人识别](diarization.md)。

@@ -9,6 +9,8 @@ from app.server import create_app
 
 
 def test_all_exposed_languages_can_be_imported_and_invalid_code_is_rejected(tmp_path,monkeypatch):
+    from app.config import Settings
+    monkeypatch.setattr('app.server.load_settings',lambda:Settings(asr_provider='faster_whisper'))
     source=tmp_path/'input.mp4';source.write_bytes(b'authored test data')
     monkeypatch.setattr('app.server.probe',lambda *_:dict(duration=8,video=True,audio=True))
     with TestClient(create_app(tmp_path/'projects')) as client:

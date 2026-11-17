@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 import wave
 from concurrent.futures import ThreadPoolExecutor
@@ -18,8 +19,11 @@ from fastapi import HTTPException
 from .config import atomic_json, resolve
 from .emotions import emotion_fields
 from .languages import target_code, tts_language
+from .model_backends import tts_backend, tts_model_signature, validate_tts
 from .media import Cancelled, check_cancel, ffmpeg, wav_duration
+from .audio_cache import reusable_voice_clip
 from .pipeline import Pipeline, file_hash, fingerprint, make_voice_clip
+from .progress import new_progress, advance, finish, tts_detail
 from .store import now
 
 MAX_TEXT = 250000
@@ -164,13 +168,13 @@ class BookStore:
         for book in self.list():
             parent=self.book(book['id']);job=parent.get('job',{})
             if job.get('status') in {'queued','running','cancelling'}:
-                self.update_book(book['id'],job={**job,'status':'interrupted','phase':'任务已中断，可继续并复用缓存'})
+                self.update_book(book['id'],job={**job,'status':'interrupted','phase':'任务已中断，可继续并复用缓存',**({'processing':finish(job['processing'],'interrupted',at=job['processing']['updated_at'])} if job.get('processing') else {})})
             for cid in parent['chapters']:
                 chapter=self.chapter(book['id'],cid)
                 if chapter['status'] in {'queued','running','cancelling'}:self.update(book['id'],cid,status='interrupted',error='上次任务中断，已完成句子可复用')
 
 
-def concatenate(paths,destination,gap,settings,log,cancel):
+def concatenate(paths,destination,gap,settings,log,cancel,on_progress=None):
     """Normalize a streaming concat to WAV; no speed filter, no in-memory whole-book buffer."""
     if not paths:raise ValueError('没有可合并的音频')
     folder=destination.parent;folder.mkdir(parents=True,exist_ok=True)
@@ -213,7 +217,11 @@ def concatenate(paths,destination,gap,settings,log,cancel):
         arguments=['-f','concat','-safe','0','-i',str(listing),'-vn','-ar','24000','-ac','1']
         arguments+=['-c:a','libmp3lame','-b:a','128k'] if destination.suffix=='.mp3' else ['-c:a','pcm_s16le']
         try:
-            ffmpeg(settings,[*arguments,str(pending)],log,cancel);check_cancel(cancel);os.replace(pending,destination)
+            if on_progress:
+                duration=sum(wav_duration(path) for path in paths)+gap*max(0,len(paths)-1)
+                ffmpeg(settings,[*arguments,str(pending)],log,cancel,duration=duration,on_progress=on_progress)
+            else:ffmpeg(settings,[*arguments,str(pending)],log,cancel)
+            check_cancel(cancel);os.replace(pending,destination)
         finally:pending.unlink(missing_ok=True)
     finally:listing.unlink(missing_ok=True);silence.unlink(missing_ok=True)
 
@@ -235,29 +243,48 @@ class Narration:
             for cid in ids:
                 chapter=self.store.chapter(book,cid)
                 if kind=='generate':
-                    tts_language({'target_language':chapter['language']},settings.index_version)
                     rows=[r for r in chapter['sentences'] if not sentence_ids or r['id'] in sentence_ids]
                     if not rows or sentence_ids and set(sentence_ids)!={r['id'] for r in rows}:raise ValueError('章节尚未分句，或所选句子不存在')
+                    validate_tts(settings,{'target_language':chapter['language']},rows)
                     for row in rows:
+                        if not tts_backend(settings).reference_audio:continue
                         vid=voice_config(row,chapter)['voice_id']
                         if not vid:raise ValueError('请为每个章节选择音色，或逐句指定音色')
                         try:voice=self.voices.read(vid)
                         except FileNotFoundError as exc:raise ValueError('所选音色不存在，请重新选择') from exc
                         if voice.get('archived'):raise ValueError('所选音色已归档，请重新选择音色')
                 elif len(chapter['audios'])!=len(chapter['sentences']) or not chapter['sentences']:raise ValueError('请先完成所有所选章节的配音，再合并导出')
-            event=threading.Event();key=self.key(book);self.pipeline.events[key]=event
-            self.store.update_book(book,job=dict(status='queued',kind=kind,phase='排队中',completed=0,total=len(sentence_ids) if sentence_ids else sum(len(self.store.chapter(book,c)['sentences']) for c in ids),chapters=ids))
-            self.pipeline.pool.submit(self.execute,book,ids,settings,event,kind,format,sentence_ids)
+            event=threading.Event();key=self.key(book)
+            self.store.update_book(book,job=dict(status='queued',kind=kind,processing=new_progress('audiobook' if kind=='generate' else 'book_export'),phase='排队中',completed=0,total=len(ids) if kind!='generate' else len(sentence_ids) if sentence_ids else sum(len(self.store.chapter(book,c)['sentences']) for c in ids),chapters=ids))
+            self.pipeline.events[key]=event
+            try:self.pipeline.futures[key]=self.pipeline.pool.submit(self.execute,book,ids,settings,event,kind,format,sentence_ids)
+            except Exception as exc:
+                self.pipeline.events.pop(key,None);self.pipeline.futures.pop(key,None)
+                self.job(book,status='failed',phase='任务未能加入处理队列',error=str(exc))
+                raise ValueError('任务未能加入处理队列，请重新启动应用后重试') from exc
             return self.store.detail(book)
 
     def cancel(self,book):
         with self.pipeline.lock:
             event=self.pipeline.events.get(self.key(book))
-            if event:event.set();self.job(book,status='cancelling',phase='正在取消')
+            if event:
+                event.set();future=self.pipeline.futures.get(self.key(book))
+                if future and future.cancel():
+                    self.pipeline.events.pop(self.key(book),None);self.pipeline.futures.pop(self.key(book),None)
+                    self.job(book,status='cancelled',phase='排队任务已取消，未开始处理',error='')
+                else:self.job(book,status='cancelling',phase='正在取消')
 
     def job(self,book,**values):
         with self.store.lock:
-            current=self.store.book(book).get('job',{});self.store.update_book(book,job={**current,**values})
+            current=self.store.book(book).get('job',{});detail=dict(values.pop('detail',{}) or {})
+            progress=current.get('processing') or new_progress('book_export' if current.get('kind')=='export' else 'audiobook')
+            status=values.get('status')
+            if status in {'done','failed','cancelled','interrupted'}:
+                progress=finish(progress,status,message=values.get('phase'))
+            else:
+                if 'phase' in values:detail.setdefault('phase','book:'+values['phase']);detail.setdefault('message',values['phase'])
+                progress=advance(progress,status=status,**detail)
+            self.store.update_book(book,job={**current,**values,'processing':progress})
 
     def execute(self,book,ids,settings,cancel,kind,format,sentence_ids):
         try:
@@ -278,7 +305,7 @@ class Narration:
                     paths.append(self.store.folder(book,cid)/self.store.chapter(book,cid)['outputs']['wav'])
                 key=fingerprint([(cid,self.store.chapter(book,cid)['outputs']['wav']) for cid in ids])
                 name='book-'+key+'.'+format;out=self.store.folder(book)/name
-                if not out.exists():concatenate(paths,out,1,settings,self.store.folder(book)/'process.log',cancel)
+                if not out.exists():concatenate(paths,out,1,settings,self.store.folder(book)/'process.log',cancel,on_progress=lambda done,total:self.job(book,phase='合并导出全书',detail=dict(phase='book_export',done=done,total=total,unit='seconds')))
                 self.store.update_book(book,outputs={**self.store.book(book)['outputs'],format:name})
                 self.job(book,status='done',phase='合并导出完成',completed=len(paths),total=len(paths))
         except Exception as exc:
@@ -287,19 +314,22 @@ class Narration:
             for cid in ids:
                 if self.store.chapter(book,cid)['status']=='running':self.store.update(book,cid,status=status,error=str(exc))
         finally:
-            with self.pipeline.lock:self.pipeline.events.pop(self.key(book),None)
+            with self.pipeline.lock:self.pipeline.events.pop(self.key(book),None);self.pipeline.futures.pop(self.key(book),None)
 
     def generate_chapter(self,book,cid,settings,cancel,sentence_ids,offset):
         chapter=self.store.chapter(book,cid);folder=self.store.folder(book,cid);(folder/'cache').mkdir(exist_ok=True)
+        self.job(book,phase='准备章节音色',detail=dict(phase='chapter_prepare',current=chapter['title'],reused=0))
         (folder/'references').mkdir(exist_ok=True)
         self.store.update(book,cid,status='running',error='',progress={'phase':'准备音色','completed':0,'total':len(chapter['sentences'])})
         model=resolve(settings.index_model)
-        if not model.is_dir():raise ValueError('IndexTTS 模型目录不存在')
-        signature=sorted((str(p.relative_to(model)),p.stat().st_size,p.stat().st_mtime_ns) for p in model.rglob('*') if p.is_file() and '.cache' not in p.parts)
+        if settings.tts_provider=='indextts' and not model.is_dir():raise ValueError('IndexTTS 模型目录不存在')
+        signature=tts_model_signature(settings)
         rows=[r for r in chapter['sentences'] if not sentence_ids or r['id'] in sentence_ids]
         plans=[];pending=[];seen=set();references={}
         for row in rows:
             check_cancel(cancel);config=voice_config(row,chapter);vid=config['voice_id']
+            if not tts_backend(settings).reference_audio:
+                references[vid]=('', '', settings.tts_voice)
             if vid not in references:
                 voice=self.voices.read(vid)
                 if voice.get('archived'):raise ValueError('所选音色已归档，请重新选择')
@@ -309,14 +339,13 @@ class Narration:
             reference,digest,name=references[vid]
             item={**row,'zh':row['text'],'speaker':vid}
             clip=make_voice_clip(item,folder,reference,settings,signature,digest,chapter['language']);path=Path(clip['output'])
-            if path.exists():
-                try:
-                    if wav_duration(path)<=0:path.unlink()
-                except (OSError,EOFError,ValueError,wave.Error):path.unlink(missing_ok=True)
+            reusable_voice_clip(path)
             plans.append((row,clip,config,digest,name))
             if not path.exists() and clip['output'] not in seen:pending.append(clip);seen.add(clip['output'])
-        original=dict(chapter['audios'])
-        def publish():
+        original=dict(chapter['audios']);last_publish=[0]
+        def publish(force=False):
+            if not force and time.monotonic()-last_publish[0]<.4:return
+            last_publish[0]=time.monotonic()
             ready=dict(original)
             for row,clip,config,digest,name in plans:
                 path=Path(clip['output'])
@@ -333,14 +362,16 @@ class Narration:
             def update(self,_,**values):
                 if 'tts_runtime' in values:
                     runtime=values['tts_runtime'];owner.store.update(book,cid,progress=runtime)
-                    owner.job(book,phase=runtime.get('phase','正在合成'));publish()
+                    owner.job(book,phase=runtime.get('phase','正在合成'),detail={**tts_detail(runtime),'current':chapter['title']});publish()
+            def update_runtime(self,identifier,**values):
+                return self.update(identifier,**values)
             def log(self,_,message):
                 with (folder/'process.log').open('a',encoding='utf-8') as log:log.write(message+'\n')
         adapter=SimpleNamespace(store=AdapterStore(),tts=self.pipeline.tts)
-        def progress(_,stage,percent,message):self.job(book,phase='正在合成');publish()
+        def progress(_,stage,percent,message,detail=None):self.job(book,phase=(detail or {}).get('message',message),detail={**(detail or {}),'current':chapter['title']});publish()
         adapter.progress=progress
         try:Pipeline.synthesize(adapter,cid,pending,len(plans),settings,cancel,'audiobook')
-        finally:publish()
+        finally:publish(force=True)
         check_cancel(cancel)
         current=self.store.chapter(book,cid)
         if any(current['audios'].get(row['id'],{}).get('file')!='cache/'+Path(clip['output']).name for row,clip,config,digest,name in plans):raise ValueError('部分句子未生成有效音频，已完成片段保留')
@@ -354,6 +385,6 @@ class Narration:
         self.job(book,phase='合并章节音频');outputs={}
         for format in ('wav','mp3'):
             name='chapter-'+key+'.'+format
-            if not (folder/name).exists():concatenate(paths,folder/name,chapter['gap'],settings,folder/'process.log',cancel)
+            if not (folder/name).exists():concatenate(paths,folder/name,chapter['gap'],settings,folder/'process.log',cancel,on_progress=lambda done,total:self.job(book,phase='合并章节音频',detail=dict(phase='chapter_export_'+format,done=done,total=total,unit='seconds',current=chapter['title'])))
             outputs[format]=name
         self.store.update(book,cid,outputs=outputs)

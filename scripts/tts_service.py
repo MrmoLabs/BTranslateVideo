@@ -24,6 +24,7 @@ def serve(folder):
     import torch
     from filelock import FileLock, Timeout
     from model_worker import load_tts, tts, write
+    from app.file_io import write_progress
     folder = Path(folder)
     parent = Path(__file__).resolve().parents[1]
     # The model retains GPU ownership while warm, not just during generation.
@@ -37,7 +38,7 @@ def serve(folder):
             request = json.loads(Path(message['request']).read_text(encoding='utf-8'))
             try:
                 if not acquired:
-                    write(folder/'state.json', dict(phase='等待 GPU'))
+                    write_progress(folder/'state.json', dict(phase='等待 GPU'))
                     while not acquired:
                         try:
                             lock.acquire(timeout=.2)
@@ -47,15 +48,16 @@ def serve(folder):
                 reused = model is not None
                 load_seconds = 0
                 if model is None:
-                    write(folder/'state.json', dict(phase='加载模型'))
+                    write_progress(folder/'state.json', dict(phase='加载模型'))
                     model, load_seconds = load_tts(request)
-                refresh_reference_cache(model, request['clips'], signatures)
-                write(folder/'state.json', dict(phase='正在合成'))
-                torch.cuda.reset_peak_memory_stats()
-                tts(request, model=model, load_seconds=load_seconds, reused=reused)
-                torch.cuda.empty_cache()
-                write(folder/'state.json', dict(phase='保温中'))
-                write(message['result'], dict(id=message['id'], ok=True))
+                if request.get('operation') != 'load':
+                    refresh_reference_cache(model, request['clips'], signatures)
+                    write_progress(folder/'state.json', dict(phase='正在合成'))
+                    torch.cuda.reset_peak_memory_stats()
+                    tts(request, model=model, load_seconds=load_seconds, reused=reused)
+                    torch.cuda.empty_cache()
+                write_progress(folder/'state.json', dict(phase='保温中'))
+                write(message['result'], dict(id=message['id'], ok=True, model_loaded=True, model_load_seconds=load_seconds))
             except Exception as exc:
                 traceback.print_exc()
                 write(message['result'], dict(id=message['id'], error=str(exc)[-4000:] or type(exc).__name__))

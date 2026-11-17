@@ -70,10 +70,10 @@ $('#novel-name-form').onsubmit=async e=>{
   }catch(error){$('#novel-name-error').textContent=error.message;}finally{button.disabled=false;}
 };
 function novelVoiceOptions(value,inherited=false){
-  return `<option value="">${esc(tr(inherited?'沿用章节音色':'选择预设音色'))}</option>`+(!state.voices.some(v=>v.id===value)&&value?`<option value="${esc(value)}">${esc(tr('当前音色不可用，请重新选择'))}</option>`:'')+state.voices.map(v=>`<option value="${v.id}" ${v.id===value?'selected':''}>${esc(v.name)}</option>`).join('');
+  return `<option value="">${esc(tr(fixedServiceVoice()?'沿用服务音色':inherited?'沿用章节音色':'选择预设音色'))}</option>`+(!state.voices.some(v=>v.id===value)&&value?`<option value="${esc(value)}">${esc(tr('当前音色不可用，请重新选择'))}</option>`:'')+state.voices.map(v=>`<option value="${v.id}" ${v.id===value?'selected':''}>${esc(v.name)}</option>`).join('');
 }
 function renderNovelVoices(initial){
-  $('#novel-voice-help').hidden=state.voices.length>0;if(!novels.chapter)return;const key=JSON.stringify([state.voices,novels.chapter.id,I18N.locale()]);if(key===novels.voiceKey&&$('#novel-voice').options.length)return;
+  $('#novel-voice-help').hidden=state.voices.length>0||fixedServiceVoice();if(!novels.chapter)return;const key=JSON.stringify([state.voices,novels.chapter.id,I18N.locale(),fixedServiceVoice()]);if(key===novels.voiceKey&&$('#novel-voice').options.length)return;
   const selected=typeof initial==='string'?initial:$('#novel-voice').value;$('#novel-voice').innerHTML=novelVoiceOptions(selected);$('#novel-voice').value=selected;novels.voiceKey=key;novels.rowKey=null;renderNovelRows();
 }
 function renderNovelButtons(){
@@ -83,8 +83,8 @@ function renderNovelButtons(){
   $('#novel-export').disabled=busy||saving||!novels.book?.chapters.length||!novels.book.chapters.every(c=>c.sentences>0&&c.ready===c.sentences);
   $('#novel-export').title=tr('完成所有章节配音后，可合并导出全书');
   for(const id of ['novel-save','novel-generate','novel-split'])$('#'+id).disabled=busy||saving||!novels.chapter;
-  for(const id of ['novel-chapter-title','novel-prose','novel-voice','novel-language','novel-gap'])$('#'+id).disabled=busy||saving;
-  $$('[data-novel-field]').forEach(el=>el.disabled=busy||saving);$$('[data-novel-generate]').forEach(el=>el.disabled=busy||saving);
+  for(const id of ['novel-chapter-title','novel-prose','novel-voice','novel-language','novel-gap'])$('#'+id).disabled=busy||saving||(id==='novel-voice'&&fixedServiceVoice());
+  $$('[data-novel-field]').forEach(el=>el.disabled=busy||saving||(el.dataset.novelField==='voice_id'&&fixedServiceVoice()));$$('[data-novel-generate]').forEach(el=>el.disabled=busy||saving);
 }
 for(const id of ['novel-chapter-title','novel-prose','novel-voice','novel-language','novel-gap'])$('#'+id).addEventListener('input',()=>novelDirty());
 async function splitNovelDraft(confirm=true){

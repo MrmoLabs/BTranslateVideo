@@ -18,6 +18,7 @@ IndexTTS 代码与权重有独立使用条件，并非 MIT，也不应将整套�
 | --- | --- |
 | IndexTTS / IndexTTS-2.5 | [源码](https://github.com/index-tts/index-tts) · [权重与许可证](https://huggingface.co/IndexTeam/IndexTTS-2.5/blob/main/LICENSE) · bilibili Model Use License Agreement |
 | Whisper / faster-whisper large-v3 | [Whisper](https://github.com/openai/whisper/blob/main/LICENSE) · [faster-whisper](https://github.com/SYSTRAN/faster-whisper/blob/master/LICENSE) · MIT；转换权重见相应模型卡 |
+| Fun-ASR-Nano / FunASR / FSMN-VAD（可选） | [Fun-ASR](https://github.com/QwenAudio/Fun-ASR) · [FunASR](https://github.com/modelscope/FunASR/blob/main/LICENSE) · 工具包 MIT；[Nano 权重](https://modelscope.cn/models/FunAudioLLM/Fun-ASR-Nano-2512) 和 [FSMN-VAD 权重](https://modelscope.cn/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch) 按各模型卡授权执行。模型和独立运行环境不随源码分发。 |
 | Qwen3-8B GGUF | [官方模型](https://huggingface.co/Qwen/Qwen3-8B-GGUF) · Apache-2.0，按所下载文件的 LICENSE/NOTICE 执行 |
 | llama.cpp | [官方许可证](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) · MIT |
 | HTDemucs / Demucs | [官方项目](https://github.com/facebookresearch/demucs) · MIT |
@@ -38,3 +39,9 @@ IndexTTS 代码与权重有独立使用条件，并非 MIT，也不应将整套�
 Windows 本机话筒和系统声音录制使用 [PyAudioWPatch](https://github.com/s0d3s/PyAudioWPatch)（MIT，底层 PortAudio 许可随安装包保留），通过 WASAPI 输入和输出回环采集；包从 PyPI 安装，不将二进制复制进源码仓库。
 
 音色采集的“录音／试听／保存”和小说的“书籍／章节／句子、进度与续跑”交互参考 [Voicebox](https://github.com/jamiepine/voicebox) 的 MIT 开源项目实现思路。当前 `app/recording.py`、`app/audiobooks.py` 及其页面为本项目原创实现，复用本项目已有 IndexTTS 会话，不引入 Voicebox 的桌面运行时或数据库。
+
+### Optional pyannote Community-1
+
+- pyannote.audio: MIT, https://github.com/pyannote/pyannote-audio .
+- Community-1 weights: CC-BY-4.0, https://huggingface.co/pyannote/speaker-diarization-community-1 . User acceptance of the official repository access conditions is required for download.
+- PyTorch, torchaudio, TorchCodec and dependencies retain their respective licenses. Neither runtime packages nor model weights are bundled in this source repository. This project does not relicense the models or identify real people.

@@ -75,7 +75,7 @@ def original_background(store, identifier, settings, cancel, progress, env, befo
             percent = round(40 * data["frames"] / max(data["total"], 1))
             if percent != previous:
                 previous = percent
-                progress(identifier, "background", 10 + percent, f"保留原背景音：已处理 {data['frames'] / 44100:.0f}/{project['media']['duration']:.0f} 秒")
+                progress(identifier, "background", 10 + percent, f"保留原背景音：已处理 {data['frames'] / 44100:.0f}/{project['media']['duration']:.0f} 秒",dict(phase='background_separate',done=data['frames']/44100,total=project['media']['duration'],unit='seconds'))
     progress_path.unlink(missing_ok=True)
     if before_gpu:
         before_gpu()
@@ -117,7 +117,7 @@ def make_preview(store, identifier, source, settings, cancel, progress, signatur
                 percent = min(98, 70 + round(28 * seconds / max(project["media"]["duration"], 1)))
                 if percent != previous:
                     previous = percent
-                    progress(identifier, "preview", percent, f"页面预览：{seconds:.0f}/{project['media']['duration']:.0f} 秒")
+                    progress(identifier, "preview", percent, f"页面预览：{seconds:.0f}/{project['media']['duration']:.0f} 秒",dict(phase='preview_encode',done=seconds,total=project['media']['duration'],unit='seconds',current=encoder))
         arguments = [executable(settings.ffmpeg), "-hide_banner", "-nostdin", "-y", *prefix, "-i", str(source), "-map", "0:v:0", "-map", track, "-sn", "-dn", "-vf", filters, *codec, "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "48000", "-metadata:s:a:0", "language="+ISO_LANGUAGES[target_code(project)], "-movflags", "+faststart", "-progress", str(progress_path), "-nostats", str(pending)]
         try:
             run(arguments, folder / "process.log", cancel, on_tick=tick, timeout=86400)
@@ -160,12 +160,12 @@ def export_project(store, identifier, settings, cancel, progress, env, before_gp
         if not mixed.is_file():
             progress(identifier, "export", 55, "混合译制对白与背景音，保持背景立体声与原时间轴")
             temporary = folder / f"mix-{signature}.pending.flac"
-            ffmpeg(settings, ["-i", str(audio), "-i", str(bed), "-filter_complex", f"[0:a]aformat=sample_rates=44100:channel_layouts=stereo[voice];[1:a]volume={gain(project):.5f}[bed];[voice][bed]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=0:latency=1[a]", "-map", "[a]", "-c:a", "flac", str(temporary)], folder / "process.log", cancel)
+            ffmpeg(settings, ["-i", str(audio), "-i", str(bed), "-filter_complex", f"[0:a]aformat=sample_rates=44100:channel_layouts=stereo[voice];[1:a]volume={gain(project):.5f}[bed];[voice][bed]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=0:latency=1[a]", "-map", "[a]", "-c:a", "flac", str(temporary)], folder / "process.log", cancel,duration=project['media']['duration'],on_progress=lambda done,total:progress(identifier,'export',60,'混合背景音' if 'background_mix'=='background_mix' else '封装双音轨视频',dict(phase='background_mix',done=done,total=total,unit='seconds')))
             os.replace(temporary, mixed)
         audio = mixed
     progress(identifier, "export", 60, "封装原画面、原音轨、含背景译制音轨与双语字幕")
     temporary = folder / f"result-{signature}.pending.mkv"
-    ffmpeg(settings, ["-i", str(folder / "source.media"), "-i", str(audio), "-i", str(folder / "bilingual.srt"), "-map", "0:v:0", "-map", "0:a:0", "-map", "1:a:0", "-map", "2:s:0", "-map_metadata", "0", "-c:v", "copy", "-c:a:0", "copy", "-c:a:1", "aac", "-b:a:1", "160k", "-c:s", "srt", "-metadata:s:a:0", "title=原始音轨", "-metadata:s:a:0", "language=" + ISO_LANGUAGES.get(project["language"], "und"), "-metadata:s:a:1", "title="+TARGET_LANGUAGES[target_code(project)]+("配音与背景音" if bed else "配音"), "-metadata:s:a:1", "language="+ISO_LANGUAGES[target_code(project)], "-disposition:a:0", "0", "-disposition:a:1", "default", "-metadata:s:s:0", "title=双语字幕", "-metadata:s:s:0", "language="+ISO_LANGUAGES[target_code(project)], "-disposition:s:0", "default", str(temporary)], folder / "process.log", cancel)
+    ffmpeg(settings, ["-i", str(folder / "source.media"), "-i", str(audio), "-i", str(folder / "bilingual.srt"), "-map", "0:v:0", "-map", "0:a:0", "-map", "1:a:0", "-map", "2:s:0", "-map_metadata", "0", "-c:v", "copy", "-c:a:0", "copy", "-c:a:1", "aac", "-b:a:1", "160k", "-c:s", "srt", "-metadata:s:a:0", "title=原始音轨", "-metadata:s:a:0", "language=" + ISO_LANGUAGES.get(project["language"], "und"), "-metadata:s:a:1", "title="+TARGET_LANGUAGES[target_code(project)]+("配音与背景音" if bed else "配音"), "-metadata:s:a:1", "language="+ISO_LANGUAGES[target_code(project)], "-disposition:a:0", "0", "-disposition:a:1", "default", "-metadata:s:s:0", "title=双语字幕", "-metadata:s:s:0", "language="+ISO_LANGUAGES[target_code(project)], "-disposition:s:0", "default", str(temporary)], folder / "process.log", cancel,duration=project['media']['duration'],on_progress=lambda done,total:progress(identifier,'export',60,'混合背景音' if 'video_mux'=='background_mix' else '封装双音轨视频',dict(phase='video_mux',done=done,total=total,unit='seconds')))
     info = probe(temporary, settings)
     if len([x for x in info["streams"] if x["codec_type"] == "audio"]) != 2: raise ValueError("导出结果缺少双音轨")
     name, preview = make_preview(store, identifier, temporary, settings, cancel, progress, signature)

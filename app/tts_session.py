@@ -10,14 +10,15 @@ import time
 import uuid
 from pathlib import Path
 
-from .config import ROOT, atomic_json
+from .config import ROOT
+from .file_io import write_progress
 from .media import check_cancel, stop_process
 
 
 def model_identity(request, python):
     code_paths = [Path(request['index_root']) / 'indextts/infer_v2_5.py',
              Path(request['index_root']) / 'indextts/infer_v2.py',
-             ROOT / 'scripts/model_worker.py', ROOT / 'scripts/tts_service.py', ROOT / 'scripts/tts_batch.py', ROOT / 'scripts/tts_local_models.py']
+             ROOT / 'scripts/model_worker.py', ROOT / 'scripts/tts_service.py', ROOT / 'scripts/tts_batch.py', ROOT / 'scripts/tts_local_models.py', ROOT / 'app/file_io.py']
     model = Path(request['model'])
     paths = [Path(python)] + sorted(p for p in model.rglob('*') if p.is_file() and '.cache' not in p.parts)
     records = [(str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in paths if p.is_file()]
@@ -40,6 +41,8 @@ class TTSSession:
         self.closed = False
         self.reason = '尚未加载'
         self.run_info = {}
+        self.loaded = False
+        self.loaded_config = None
 
     def status(self):
         process = self.process
@@ -52,9 +55,10 @@ class TTSSession:
                     phase = json.loads((self.folder / 'state.json').read_text(encoding='utf-8')).get('phase', phase)
                 except (OSError, ValueError):
                     phase = '启动中'
-        return dict(alive=alive, busy=self.running, phase=phase,
+        return dict(alive=alive, loaded=alive and self.loaded, busy=self.running, phase=phase,
+                    model=self.loaded_config, keep_loaded=alive and self.deadline is None,
                     pid=process.pid if alive else None,
-                    idle_seconds=max(0, round(self.deadline-self.clock())) if alive and not self.running else None,
+                    idle_seconds=max(0, round(self.deadline-self.clock())) if alive and not self.running and self.deadline is not None else None,
                     reason=self.reason)
 
     def _stop(self, reason):
@@ -71,6 +75,8 @@ class TTSSession:
         if self.log:
             self.log.close()
         self.process = self.log = self.key = None
+        self.loaded = False
+        self.loaded_config = None
         self.deadline = 0
         self.reason = reason
 
@@ -87,6 +93,31 @@ class TTSSession:
             self.closed = True
             self._stop('应用已关闭')
 
+    def configure_retention(self, idle_seconds):
+        """Apply an idle policy without ever blocking behind inference/model loading."""
+        if not self.guard.acquire(blocking=False):
+            return False
+        try:
+            if self.running:
+                return False
+            if self.process and self.process.poll() is None:
+                self._retain(idle_seconds)
+            return True
+        finally:
+            self.guard.release()
+
+    def _retain(self, idle_seconds):
+        if self.timer:
+            self.timer.cancel()
+            self.timer = None
+        if idle_seconds is None:
+            self.deadline = None
+        elif idle_seconds <= 0:
+            self._stop('已按保温设置释放模型')
+        else:
+            self.deadline = self.clock() + idle_seconds
+            self._schedule_expiry()
+
     def _schedule_expiry(self):
         # Timer waits can finish before the monotonic deadline on Windows.
         self.timer = threading.Timer(max(.01, self.deadline-self.clock()),
@@ -97,7 +128,7 @@ class TTSSession:
     def _expire(self, deadline):
         with self.guard:
             # Ignore a cancelled callback that waited behind a newer task.
-            if self.running or not self.process or deadline != self.deadline:
+            if self.running or not self.process or self.deadline is None or deadline != self.deadline:
                 return
             if self.clock() >= deadline:
                 self._stop('空闲保温已到期，自动释放显存')
@@ -133,7 +164,7 @@ class TTSSession:
                 self.key = key
             self.run_info = dict(model_reused=reused, model_load_reason='' if reused else load_reason)
             self.running = True
-            atomic_json(self.folder / 'state.json', dict(phase='复用已加载模型' if reused else '启动配音进程'))
+            write_progress(self.folder / 'state.json', dict(phase='复用已加载模型' if reused else '启动配音进程'))
             token = uuid.uuid4().hex
             result_path = self.folder / (token + '.json')
             session_log = self.folder / 'process.log'
@@ -166,6 +197,11 @@ class TTSSession:
                             raise RuntimeError(result['error'] or '配音模型执行失败')
                         if result.get('ok') is not True:
                             raise RuntimeError('配音模型未返回成功结果')
+                        if request.get('operation') == 'load' and result.get('model_loaded') is not True:
+                            raise RuntimeError('模型未确认加载完成')
+                        self.loaded = True
+                        self.loaded_config = {name: request[name] for name in ('index_root','model','version')}
+                        self.run_info.update(model_load_seconds=result.get('model_load_seconds', 0))
                         break
                     exit_code=self.process.poll()
                     if exit_code is not None:
@@ -180,8 +216,4 @@ class TTSSession:
                 raise
             finally:
                 self.running = False
-            self.deadline = self.clock()+idle_seconds
-            if idle_seconds <= 0:
-                self._stop('已按设置在任务后释放')
-            else:
-                self._schedule_expiry()
+            self._retain(idle_seconds)

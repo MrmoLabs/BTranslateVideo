@@ -10,6 +10,8 @@ import wave
 import socket
 import time
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from app.file_io import atomic_json,write_progress
 
 DLL_HANDLES = []
 if os.name == "nt":
@@ -29,29 +31,33 @@ def block_network():
 
 
 def write(path, value):
-    temporary = Path(str(path) + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_json(Path(path), value)
 
 
-def asr(request):
+def asr(request, model=None):
+    progress=request.get('progress')
+    if progress:write_progress(progress,dict(phase='asr_load' if model is None else 'asr_prepare',message='加载语音识别模型' if model is None else '复用识别模型'))
     from faster_whisper import WhisperModel
     import numpy as np
 
-    model = WhisperModel(request["model"], device=request["device"], compute_type=request["compute_type"], local_files_only=True)
+    if model is None:model = WhisperModel(request["model"], device=request["device"], compute_type=request["compute_type"], local_files_only=True)
     with wave.open(request["audio"], "rb") as stream:
         if (stream.getframerate(), stream.getnchannels(), stream.getsampwidth()) != (16000, 1, 2):
             raise ValueError("ASR 需要预处理为 16kHz 单声道 PCM16")
         audio = np.frombuffer(stream.readframes(stream.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+    if progress:write_progress(progress,dict(phase='asr_prepare',message='准备音频与语言检测'))
     segments, info = model.transcribe(audio, language=request["language"] or None, task="transcribe", vad_filter=True, word_timestamps=True, beam_size=5, condition_on_previous_text=False, hallucination_silence_threshold=1.0)
     output = []
+    if progress:write_progress(progress,dict(phase='asr_decode',message='识别原文并生成词级时间戳',done=0,total=info.duration,unit='seconds'))
     for segment in segments:
+        if progress:write_progress(progress,dict(phase='asr_decode',message='识别原文并生成词级时间戳',done=segment.end,total=info.duration,unit='seconds'))
         text = segment.text.strip()
         if text and segment.end > segment.start:
             words = [dict(word=w.word, start=round(max(0, w.start), 3), end=round(min(info.duration, w.end), 3)) for w in (segment.words or []) if w.word.strip()]
             output.append(dict(id=len(output) + 1, start=round(max(0, segment.start), 3), end=round(min(info.duration, segment.end), 3), text=text, zh="", speaker="speaker_1", words=words))
             print(f"ASR {segment.end:.1f}s: {text}", flush=True)
     write(request["output"], output)
+    if progress:write_progress(progress,dict(phase="asr_decode",message="识别完成，校验词级时间戳",done=info.duration,total=info.duration,unit="seconds"))
 
 
 def load_tts(request):
