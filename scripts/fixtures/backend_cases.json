@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "license": "MIT; original synthetic acceptance sentences, no third-party recording",
+  "cases": [
+    {"id": "en-course", "language": "en", "culture": "en-US", "source": "There are 8 students in this class. Not all students passed the test. Only after normalization do we add the residual connection.", "numbers": ["8"], "review": "Chinese must retain eight students, partial negation, and normalization before residual addition."},
+    {"id": "ja-dialogue", "language": "ja", "culture": "ja-JP", "source": "教室には8人います。全員が試験に合格したわけではありません。明日は20分早く来てください。", "numbers": ["8", "20"], "review": "Chinese must retain eight people, partial negation, and arriving twenty minutes earlier tomorrow; no Japanese kana."}
+  ],
+  "tts": [
+    {"text": "这是本地语音模型的独立验收。请听清每一个字。", "language": "zh", "review": "Check intelligibility, natural pauses and voice stability by listening."},
+    {"text": "教室里有八位学生，并不是所有人都通过了考试。", "language": "zh", "review": "Check eight students and partial negation; compare with the first clip for voice consistency."}
+  ]
+}

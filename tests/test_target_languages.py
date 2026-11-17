@@ -142,3 +142,29 @@ def test_different_target_languages_are_never_combined_in_one_native_batch(tmp_p
     clips=[dict(id=i,text='sample',reference='reference',output=str(tmp_path/f'{i}.wav'),lang=lang) for i,lang in enumerate(['ZH','ZH','EN','EN'])]
     batch.run_clips(model,clips,4)
     assert native==[['ZH','ZH']] and singles==['EN','EN']
+
+
+def test_language_correction_preserves_manual_script_but_invalidates_all_generated_media(tmp_path):
+    app=create_app(tmp_path/'projects')
+    with TestClient(app) as client:
+        store=app.state.store;project=store.create('language correction','en','course',target_language='ja');id=project['id']
+        folder=store.folder(id);(folder/'cache').mkdir()
+        old_audio='translated.wav';(folder/old_audio).write_bytes(b'old Japanese voice')
+        before=store.update(id,segments=[row()],media={'duration':3},references={'speaker_1':'ref.wav'},
+            outputs={'audio':old_audio},dub_signature='old',export_signature='old',audition={'file':'old.wav'},
+            audition_request={'id':'old'},translation_proposal={'id':'old'},tts_runtime={'phase':'old'},processing={'status':'failed'})
+        url=f'/api/projects/{id}/target-language'
+        assert client.put(url,json=dict(target_language='zh',revision=-1,preserve_translations=True)).status_code==409
+        after=client.put(url,json=dict(target_language='zh',revision=before['edit_revision'],preserve_translations=True)).json()
+        assert after['target_language']=='zh' and after['segments']==before['segments']
+        assert after['references']==before['references'] and after['edit_revision']==before['edit_revision']+1
+        assert after['outputs']=={} and not after['dub_signature'] and not after['export_signature']
+        assert after['audition'] is None and after['audition_request'] is None and after['translation_proposal'] is None
+        assert after['tts_runtime'] is None and after['processing'] is None
+        snapshot=next((folder/'history').iterdir())
+        assert (snapshot/old_audio).read_bytes()==b'old Japanese voice'
+        assert json.loads((snapshot/'project.json').read_text(encoding='utf-8'))['target_language']=='ja'
+        clip=make_voice_clip(after['segments'][0],folder,'ref.wav',Settings(),[],'reference hash',target_language=after['target_language'])
+        assert clip.get('lang','ZH')=='ZH'
+        assert '你好12' in (folder/'chinese.srt').read_text(encoding='utf-8')
+        assert client.put(url,json=dict(target_language='ja',revision=before['edit_revision'],preserve_translations=True)).status_code==409

@@ -312,7 +312,8 @@ def plan_block(url, settings, words, context, mode, cancel, trace=None):
             messages.append({"role": "user", "content": "The previous plan was rejected. Return a complete new plan and correct this validation error: " + str(error)})
         content = ""
         try:
-            response = asyncio.run(_post_cancellable(url + "/chat/completions", {"model": settings.translation_name, "messages": messages, "temperature": .1, "max_tokens": 2200, "response_format": {"type": "json_object"}, "chat_template_kwargs": {"enable_thinking": False}}, cancel))
+            from .model_backends import chat_payload
+            response = asyncio.run(_post_cancellable(url + "/chat/completions", chat_payload(settings, {"model": settings.translation_name, "messages": messages, "temperature": .1, "max_tokens": 2200, "response_format": {"type": "json_object"}, "chat_template_kwargs": {"enable_thinking": False}}), cancel))
             response.raise_for_status()
             choice = response.json()["choices"][0]
             content = choice["message"]["content"]
@@ -342,13 +343,13 @@ def semantic_segments(raw, duration, url, settings, mode, cancel, cache: Path, p
                 break
             end += 1
         window = words[cursor:end]
-        key = hashlib.sha256(json.dumps([VERSION, window, mode, settings.translation_model, settings.translation_name], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
+        key = hashlib.sha256(json.dumps([VERSION, window, mode, settings.translation_model, settings.translation_name] + ([settings.translation_url, settings.translation_provider, settings.translation_json_mode, settings.translation_revision] if settings.translation_url else ([settings.translation_revision] if settings.translation_revision else [])), sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
         path = cache / ("sentences-" + key + ".json")
         # Completed V6-V8 windows were source-validated too. Validate them
         # again before reuse, and retry planning if a cached plan is obsolete.
         cuts = None
         for version in (VERSION, 9, 8, 7, 6):
-            candidate_key = hashlib.sha256(json.dumps([version, window, mode, settings.translation_model, settings.translation_name], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
+            candidate_key = hashlib.sha256(json.dumps([version, window, mode, settings.translation_model, settings.translation_name] + ([settings.translation_url, settings.translation_provider, settings.translation_json_mode, settings.translation_revision] if settings.translation_url else ([settings.translation_revision] if settings.translation_revision else [])), sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
             candidate = cache / ("sentences-" + candidate_key + ".json")
             if candidate.is_file():
                 try:

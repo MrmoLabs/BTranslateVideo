@@ -15,6 +15,7 @@ from contextlib import contextmanager
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from app.emotions import emotion_key,emotion_kwargs,emotion_vector
+from app.file_io import atomic_json,write_progress
 
 
 class NotBatchable(ValueError): pass
@@ -33,11 +34,7 @@ def groups(clips, size):
 
 
 def report(path, value):
-    if not path: return
-    target=Path(path); target.parent.mkdir(parents=True,exist_ok=True)
-    temporary=target.with_suffix('.pending.json')
-    temporary.write_text(json.dumps(value,ensure_ascii=False),encoding='utf-8')
-    os.replace(temporary,target)
+    return write_progress(path, value)
 
 
 @contextmanager
@@ -194,5 +191,5 @@ def run_clips(model, clips, batch_size=1, stats_path=None, progress_path=None, m
     torch.cuda.synchronize()
     stats=publish('合成完成')
     stats.update(clips=done,seconds=round(time.perf_counter()-started,4),history=history)
-    report(stats_path,stats)
+    if stats_path:atomic_json(Path(stats_path),stats)
     return stats

@@ -144,3 +144,16 @@ def test_large_chapter_split_and_save_do_not_drop_content(tmp_path):
         result=client.put(f"/api/audiobooks/{book['id']}/chapters/{chapter['id']}",json={**chapter,'text':text,'sentences':rows})
         assert result.status_code==200 and len(result.json()['sentences'])==1800
         assert client.post('/api/audiobooks/split',json={'text':'x'*250001}).status_code==422
+
+
+def test_failed_novel_queue_persistence_does_not_leave_book_busy(tmp_path,monkeypatch):
+    app=create_app(tmp_path/'projects')
+    with TestClient(app):
+        book,cid,_,settings=fixture(app,tmp_path);before=app.state.books.book(book);original=app.state.books.update_book
+        def blocked(identifier,**values):
+            if values.get('job',{}).get('status')=='queued':raise PermissionError('book write blocked')
+            return original(identifier,**values)
+        monkeypatch.setattr(app.state.books,'update_book',blocked)
+        with pytest.raises(PermissionError):app.state.narration.submit(book,[cid],settings)
+        assert not app.state.narration.busy(book) and not app.state.pipeline.futures
+        assert app.state.books.book(book)==before

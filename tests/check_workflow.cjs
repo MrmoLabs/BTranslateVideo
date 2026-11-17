@@ -1,0 +1,31 @@
+const assert=require('node:assert/strict');
+const {coordinator,stages,mergeRuntime,acceptsProject}=require('../app/static/workflow-core.js');
+const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
+(async()=>{
+  const state={id:'a',selectionVersion:1,dirty:true,audioDirty:false};
+  let save=deferred(),calls=0;
+  const actions=coordinator({state,saveText:async()=>{await save.promise;state.dirty=false;},saveAudio:async()=>{},message:s=>s});
+  const pending=actions.task('translate',async()=>calls++);
+  state.id='b';state.selectionVersion++;save.resolve();
+  await assert.rejects(pending,/项目已切换/);assert.equal(calls,0);
+  state.dirty=true;save=deferred();
+  const first=actions.task('dub',async()=>{calls++;return 42;});
+  const second=actions.task('dub',async()=>{calls++;});save.resolve();
+  assert.equal(await first,42);assert.equal(await second,42);assert.equal(calls,1);
+  state.dirty=true;
+  const edit=coordinator({state,saveText:async()=>{},saveAudio:async()=>{},message:s=>s});
+  await assert.rejects(edit.prepare(),/未保存/);
+  // New text typed while the separate audio-settings save is in flight is retained.
+  state.dirty=false;state.audioDirty=true;
+  const both=coordinator({state,saveText:async()=>{},saveAudio:async()=>{state.audioDirty=false;state.dirty=true;},message:s=>s});
+  await assert.rejects(both.prepare({audio:true}),/未保存/);
+  assert.equal(stages.source.next,'subtitles');assert.equal(stages.voices.next,'export');
+  const rows=[{id:1}],project={content_version:'a',segments:rows,status:'idle'};
+  assert.equal(mergeRuntime(project,{content_version:'b',status:'running'}),null);
+  const merged=mergeRuntime(project,{content_version:'a',status:'running',segments:[]});assert.equal(merged.segments,rows);assert.equal(merged.status,'running');
+  assert.equal(acceptsProject({id:'a',updated:'2026-10-31T10:01:00+00:00'},{id:'a',updated:'2026-10-31T10:00:00+00:00',edit_revision:3},3),false);
+  assert.equal(acceptsProject({id:'a'},{id:'a',edit_revision:2},3),false);
+  assert.equal(acceptsProject({id:'a',metadata_revision:4},{id:'a',metadata_revision:3,edit_revision:3},3),false);
+  assert.equal(acceptsProject({id:'a'},{id:'a',edit_revision:3},3),true);
+  console.log('Workflow dispatch: draft races, selection changes and duplicate clicks OK');
+})().catch(error=>{console.error(error);process.exitCode=1;});

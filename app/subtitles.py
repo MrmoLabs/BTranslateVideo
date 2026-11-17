@@ -46,7 +46,9 @@ def validate_segments(segments: list[dict], duration: float | None = None) -> li
         text, zh = str(item.get("text", "")).strip(), str(item.get("zh", "")).strip()
         if not text or len(text) > 6000 or len(zh) > 6000:
             raise ValueError(f"第 {identifier} 段原文为空或文本过长")
-        output.append(dict(id=identifier, start=start, end=end, text=text, zh=zh, speaker=speaker,**emotion_fields(item)))
+        from .human_review import review_fields
+        clean = dict(id=identifier, start=start, end=end, text=text, zh=zh, speaker=speaker, **emotion_fields(item))
+        output.append({**clean, **review_fields({**clean, **{k: item[k] for k in ('review_status', 'review_signature') if k in item}})})
         seen.add(identifier)
         last_start = start
     return output

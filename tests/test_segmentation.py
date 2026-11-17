@@ -75,13 +75,16 @@ def test_failed_resegment_preserves_edits_then_success_backs_up(tmp_path, monkey
     folder = store.folder(identifier)
     (folder / "cache").mkdir()
     (folder / "source.media").write_bytes(b"original video")
+    from app.pipeline import file_hash
+    atomic_json(folder/'cache/asr.json',raw_words('hello there'))
+    atomic_json(folder/'cache/asr-words-metadata.json',dict(source=file_hash(folder/'source.media'),model='cached-whisper'))
     for name in ["chinese.srt", "chinese.wav", "result.mkv"]:
         (folder / name).write_bytes(b"previous output")
     old = [dict(id=1, start=0, end=2, text="hello there", zh="人工译文", speaker="speaker_1")]
     store.update(identifier, segments=old, media={"duration": 5}, outputs={"video": "result.mkv"}, dub_signature="old")
     pipeline = Pipeline(store)
     monkeypatch.setattr(pipeline, "audio", lambda *_: folder / "fake.wav")
-    monkeypatch.setattr("app.pipeline.run", lambda *_a, **_kw: atomic_json(folder / "cache/asr.json", raw_words("hello there")))
+    monkeypatch.setattr("app.model_backends.run", lambda *_a, **_kw: atomic_json(folder / "cache/asr.json", raw_words("hello there")))
     @contextmanager
     def translator(*_):
         yield "unused"

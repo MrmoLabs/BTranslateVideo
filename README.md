@@ -10,14 +10,16 @@ Translate and dub videos into Chinese, English, Japanese, Spanish or Arabic with
 
 ## Workflow
 
-1. **Import:** select a local video, its source and target languages, and its content type. Twelve explicit source languages plus auto-detection are available.
-2. **Review:** search paginated sentences, edit translations and compare optional rewrite suggestions.
-3. **Audition:** choose a reusable voice preset or project reference, then set emotion and intensity for individual or selected sentences. Audition unsaved drafts without replacing project outputs.
-4. **Watch:** play dubbed MP4 previews with switchable subtitles; download an original-quality MKV with original and dubbed audio tracks.
+1. **Source & recognition:** import a local video, choose its source language and content type, then recognize/import source subtitles or resegment the timeline.
+2. **Translate & review:** set the target language, edit bilingual sentences, listen to source audio and run batch recognition, translation or refinement with compare-and-adopt.
+3. **Characters & dubbing:** group speakers, name characters and bind reusable voices; adjust expression in bulk, audition drafts and generate the full voice track.
+4. **Mix & export:** configure background audio and volume, generate a video, preview with switchable subtitles and download the results.
+
+Drafts stay with the project across steps. Header navigation moves between steps; “One-click finish” explicitly runs the whole pipeline. Project storage offers per-category usage and exact-file cleanup previews. See [workflow, storage and independent backend acceptance](docs/workflow.md).
 
 Short utterances keep their natural speed. Longer utterances use bounded acceleration; sentences are never truncated to fit. Compatible voice conditions are batched, and unchanged audio is cached. HTDemucs estimates background audio; separation may leave dialogue or affect sound effects. Lip sync and removal of burned-in subtitles are not included.
 
-<p align="center"><img src="docs/assets/workspace.png" alt="Sentence review workspace using authored example subtitles" width="900"></p>
+<p align="center"><img src="docs/assets/workflow-review.jpg" alt="Sentence review workspace using authored example subtitles" width="900"></p>
 
 The screenshot uses authored example subtitles; it includes no private videos, voice references or model outputs.
 
@@ -71,3 +73,20 @@ Use videos and voice references you are entitled to use. This independent projec
 Create a voice from a file, a microphone recording, or Windows system audio (WASAPI loopback). Recording starts only on an explicit click, stops automatically at 29 seconds, and can be previewed before saving.
 
 The Audiobooks menu organizes books into chapters. Paste prose, split it into editable sentences, choose a default voice or sentence overrides, and generate narration with progress and resumable clip caching. Chapters export as WAV / MP3; merge completed chapters into one book in chapter order. Narration retains its natural speed and shares the existing warm IndexTTS worker with video tasks. See the [usage guide](docs/usage.md). Local books and recordings are excluded from Git.
+
+### Configurable model backends
+
+Choose native models or user-managed local transcription, chat and speech APIs in Settings. A reference-audio bridge contract supports future cloning engines without tying the workspace to one model. See [model configuration and interface contracts](docs/model-backends.md) for capabilities, cache revisions and compatibility limits.
+
+Processing exposes measured phase counts, elapsed time, queue positions and local diagnostics across menus. See [progress tracking](docs/progress.md).
+
+### Optional local speaker diarization
+
+Community-1 can identify speakers on CPU or CUDA GPU, with automatic, exact or bounded speaker counts. Review the proposed subtitle assignments and original voice samples before adopting them; existing voices and outputs are protected. Models require user-authorized access and run offline after download. See [local diarization setup](docs/diarization.md).
+
+
+### Sentence correction
+
+Subtitle review supports audio-based re-transcription of one cue, source polishing, translation polishing, and joint source/translation correction. Candidates stay separate until adopted; source-only changes clear their obsolete translation. Use the original-audio player to verify names and numbers. Chinese output is checked for Japanese kana, including names and half-width text; existing affected cues appear in the review filter. Shared Han characters alone cannot reliably distinguish Japanese from Chinese. See the [usage guide](docs/usage.md) for details.
+
+Batch subtitle review supports cross-page and filtered selection, inline editable candidates, selected adoption, per-cue failures and resume. Translation and transcription models are reused within each batch.

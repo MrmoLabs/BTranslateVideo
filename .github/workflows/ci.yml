@@ -51,6 +51,23 @@ jobs:
           node --check app/static/workspace.js
           node --check app/static/novels.js
           node --check app/static/recorder.js
+          node --check app/static/model-backends.js
+          node --check app/static/tts-controls.js
+          node --check app/static/progress-ui.js
+          node --check app/static/project-actions.js
+          node --check app/static/source-audio.js
+          node --check app/static/diarization.js
           node tests/check_i18n.cjs
+          node tests/check_progress_ui.cjs
+          node --check app/static/workflow-core.js
+          node --check app/static/workflow.js
+          node --check app/static/generated-speech.js
+          node tests/check_workflow.cjs
+          node tests/check_subtitle_export.cjs
+          node --check app/static/project-experience.js
+          node --check app/static/subtitle-tools-core.js
+          node --check app/static/subtitle-tools.js
+          node tests/check_project_experience.cjs
+          node tests/check_subtitle_tools.cjs
       - name: Run CPU and real-media regression tests
         run: uv run --no-sync pytest -q

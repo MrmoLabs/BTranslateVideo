@@ -12,11 +12,12 @@ import httpx
 
 from .config import ROOT, Settings, llama_path, resolve
 from .media import check_cancel, spawn, stop_process
+from .model_backends import uses_translation_service
 
 
 @contextmanager
 def _local_translator_unlocked(settings: Settings, log: Path, cancel: Event):
-    if settings.translation_url:
+    if uses_translation_service(settings):
         yield settings.translation_url
         return
     binary, model = llama_path(settings), resolve(settings.translation_model)
@@ -50,7 +51,7 @@ def _local_translator_unlocked(settings: Settings, log: Path, cancel: Event):
 
 @contextmanager
 def local_translator(settings: Settings, log: Path, cancel: Event):
-    if settings.translation_url:
+    if uses_translation_service(settings):
         yield settings.translation_url
         return
     from filelock import FileLock, Timeout
@@ -69,7 +70,11 @@ def local_translator(settings: Settings, log: Path, cancel: Event):
         lock.release()
 
 
-def parse_translation(content: str, expected: list[int]) -> dict[int, str]:
+class TranslationIDsError(ValueError):
+    """An exact identity mismatch; callers may retry a smaller request."""
+
+
+def translation_items(content: str) -> list[dict]:
     content = content.strip()
     if "</think>" in content:
         content = content.rsplit("</think>", 1)[1].strip()
@@ -79,14 +84,31 @@ def parse_translation(content: str, expected: list[int]) -> dict[int, str]:
     items = value.get("translations") if isinstance(value, dict) else value
     if not isinstance(items, list):
         raise ValueError("翻译模型未返回 translations 数组")
+    return items
+
+
+def parse_translation(content: str, expected: list[int]) -> dict[int, str]:
     result = {}
-    for item in items:
-        identifier, text = int(item["id"]), item.get("translation", item.get("zh"))
-        if identifier in result or not isinstance(text, str) or not text.strip():
-            raise ValueError("译文编号重复或内容为空")
+    for item in translation_items(content):
+        if not isinstance(item, dict):
+            raise ValueError("译文条目必须包含 id 和译文")
+        raw_id = item.get("id")
+        if type(raw_id) is int:
+            identifier = raw_id
+        elif isinstance(raw_id, str) and raw_id.strip().isascii() and raw_id.strip().isdigit():
+            identifier = int(raw_id)
+        else:
+            raise TranslationIDsError("译文编号必须是整数，未保存此批次")
+        text = item.get("translation", item.get("zh"))
+        if identifier in result:
+            raise TranslationIDsError(f"译文编号重复：{identifier}，未保存此批次")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("译文内容为空")
         result[identifier] = text.strip()
     if set(result) != set(expected):
-        raise ValueError("译文编号与原文不匹配，未保存此批次")
+        missing = sorted(set(expected) - set(result))
+        extra = sorted(set(result) - set(expected))
+        raise TranslationIDsError(f"译文编号与原文不匹配，未保存此批次；缺少编号 {missing[:12]}，多余编号 {extra[:12]}；要求编号 {expected[:12]}")
     return result
 
 
@@ -104,7 +126,9 @@ async def _post_cancellable(url, payload, cancel):
                 await asyncio.gather(task, return_exceptions=True)
 
 
-def translate_batch(url, settings, batch, context, mode, cancel, *, cache=None, topic=None):
+def translate_batch(url, settings, batch, context, mode, cancel, *, cache=None, topic=None, on_checks=None, on_failure=None):
     from .translation_quality import run_workflow
-    result = run_workflow(url, settings, batch, context, mode, cancel, cache=cache, topic=topic)
+    result = run_workflow(url, settings, batch, context, mode, cancel, cache=cache, topic=topic, on_failure=on_failure)
+    if on_checks is not None:
+        on_checks({identifier:item["checks"] for identifier,item in result.items() if item.get("checks")})
     return {identifier: item["zh"] for identifier, item in result.items()}

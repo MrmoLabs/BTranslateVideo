@@ -1,0 +1,98 @@
+/* Task-oriented editing; existing model adapters and project content stay shared. */
+[hidden]{display:none!important}
+.project-goal-controls{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin-top:8px}
+.project-goal-controls label{display:flex;align-items:center;gap:8px;margin:0;font-size:12px}
+.project-goal-controls select{width:auto;min-height:30px;padding:4px 8px;margin:0}
+.project-goal-controls button{min-height:30px;font-size:12px;padding:4px 9px}
+.project-goal-controls .subtle{font-size:11px}
+.draft-recovery{padding:12px;background:#fff5df;border:1px solid #dfc48b;margin:10px 0;max-width:760px}
+.draft-recovery p{margin:0 0 9px;line-height:1.6}
+.draft-recovery button{font-size:12px}
+.recognition-profile{padding:12px;border:1px solid var(--line);background:var(--soft);margin:12px 0}
+.recognition-profile p{font-size:12px;margin:7px 0;line-height:1.5}
+.recognition-profile .model-path{font-family:monospace;font-size:11px;overflow-wrap:anywhere;color:var(--muted)}
+#asr-next-model{display:none}.recognition-profile:has(#project-asr-options[open]) #asr-next-model{display:block}
+.recognition-profile summary,.model-advanced summary{cursor:pointer;font-size:12px;padding:6px 0}
+.asr-project-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.asr-project-grid label{font-size:12px;margin:0}.asr-project-grid input,.asr-project-grid select{min-height:32px;margin-top:4px;padding:5px 8px}
+.asr-project-checks{display:flex;gap:8px;flex-wrap:wrap}.asr-project-checks button{min-height:30px;padding:5px 8px;font-size:12px}
+.asr-excerpt:empty,#asr-runtime-result:empty{display:none}
+.model-advanced{border-top:1px solid var(--line);margin-top:6px;padding-top:5px}.model-advanced>label{margin:8px 0!important}
+.subtitle-language-details{border-bottom:1px solid var(--line);margin:0 0 10px;font-size:12px}
+.subtitle-language-details>summary{cursor:pointer;color:var(--muted);padding:5px 0}
+.subtitle-language-details .target-toolbar{margin:6px 0 10px}.editor-help{font-size:11px;color:var(--muted);margin:3px 0}
+.editor-help summary{cursor:pointer}.subtitle-export-bar{align-items:center;gap:8px;flex-wrap:wrap}
+.subtitle-export-bar>label{font-size:11px;display:flex;align-items:center;gap:6px;margin:0 0 0 auto}
+.subtitle-export-bar>label select{width:auto;min-height:28px;padding:3px 6px;margin:0}
+.cue-more{display:inline-block;position:relative;text-align:left;font-size:12px}
+.cue-more>summary{cursor:pointer;padding:6px 8px;color:var(--muted);white-space:nowrap}
+.cue-more>div{position:absolute;right:0;top:100%;z-index:12;background:white;min-width:156px;padding:6px;border:1px solid var(--line)}
+.cue-more>div button{display:block!important;width:100%!important;margin:0!important;text-align:left;font-size:12px;min-height:32px}
+.subtitle-review-toolbar:not(.has-selection) .review-batch-actions{display:none}
+.subtitle-review-toolbar:not(.has-selection) #review-clear-selection{display:none}
+.subtitle-review-toolbar #review-select-candidates:disabled{display:none}
+.goal-transcribe #segment-list td:nth-child(4),.goal-transcribe .review-table th:nth-child(4){display:none}
+.goal-transcribe #segment-list .badge:not(.review-candidate-badge):not(.review-human-badge){display:none}
+.goal-transcribe #review-select-issues{display:none}
+.goal-transcribe .cue-more [data-refine-mode="translation"],.goal-transcribe .cue-more [data-refine-mode="both"],.goal-transcribe .cue-more [data-retranslate]:not([data-refine-mode]),.goal-transcribe .cue-more [data-cue-voice]{display:none!important}
+.goal-transcribe .tabs,.goal-translate .tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
+body.subtitle-workbench #workspace>.project-backbar{margin-bottom:6px}
+body.subtitle-workbench #workspace>.project-heading{margin-bottom:10px;gap:10px}
+body.subtitle-workbench #project-title{font-size:22px;margin-block:4px}
+body.subtitle-workbench #project-overview{margin-block:4px}
+body.subtitle-workbench .tabs{margin:10px 0 12px}
+body.subtitle-workbench .tabs .tab{padding:9px 12px;min-height:48px}
+body.subtitle-workbench #panel-subtitles>.section-toolbar{padding:4px 0;margin-bottom:6px;gap:8px}
+body.subtitle-workbench #panel-subtitles>.section-toolbar h2{font-size:18px}
+body.subtitle-workbench #panel-subtitles>.section-toolbar p{margin-top:3px}
+body.subtitle-workbench .subtitle-board{padding:12px}
+body.subtitle-workbench .subtitle-export-bar{padding:0 0 8px;margin:0}
+body.subtitle-workbench .review-filters{gap:8px;margin:4px 0}
+body.subtitle-workbench .subtitle-review-toolbar{padding:6px 9px;margin-top:5px;position:static}
+body.subtitle-workbench .review-table td{padding-block:8px;vertical-align:top}
+body.subtitle-workbench:not(.comfortable-subtitles) .review-table textarea{min-height:44px!important;padding:6px 8px;line-height:1.5}
+body.subtitle-workbench .review-table td:last-child>button{display:inline-block;width:auto;margin:0 3px 4px 0;font-size:12px;min-height:30px;padding:5px 8px}
+body.subtitle-workbench #workspace>.project-backbar{padding-top:0;min-height:28px}
+body.subtitle-workbench #workspace>.project-heading{padding-block:0}
+body.subtitle-workbench #project-meta{display:none}
+body.subtitle-workbench #workspace>.tabs{margin-block:8px}
+body.subtitle-workbench .tabs .tab{height:44px;min-height:44px;padding:5px 10px}
+body.subtitle-workbench #panel-subtitles>.section-toolbar{min-height:0;margin-top:6px;padding-block:2px}
+body.subtitle-workbench #panel-subtitles>.section-toolbar h2{margin:0;line-height:1.3}
+body.subtitle-workbench #panel-subtitles>.section-toolbar p{font-size:11px;margin:2px 0 0}
+body.subtitle-workbench .review-filters input,body.subtitle-workbench .review-filters select{min-height:32px;padding-block:5px}
+body.subtitle-workbench .review-table th{padding:6px 8px;font-size:12px}
+body.subtitle-workbench .review-table th:last-child{width:180px}
+body.subtitle-workbench .review-table td:last-child{white-space:nowrap}
+body.subtitle-workbench .review-table td:last-child .cue-more{vertical-align:middle}
+.goal-transcribe #segment-list .review-cue small:last-of-type{display:none}
+@media(max-width:950px){
+  .goal-transcribe .subtitle-board .review-table td:nth-child(3){grid-column:2/-1}
+  .goal-transcribe .subtitle-board .review-table td:last-child{grid-column:2/-1;grid-row:3}
+  .cue-more>div{position:static;min-width:0}.project-goal-controls{gap:6px}
+}
+@media(max-width:650px){
+  body.subtitle-workbench .sidebar .brand{display:none}
+  body.subtitle-workbench .sidebar .main-menu{margin:0}
+  body.subtitle-workbench .sidebar{padding-block:6px}
+  body.subtitle-workbench .topbar{min-height:42px;padding-block:5px}
+  body.subtitle-workbench #workspace>.project-heading{display:block}
+  body.subtitle-workbench #project-title{font-size:17px}
+  body.subtitle-workbench #project-meta,body.subtitle-workbench #project-overview{display:none}
+  body.subtitle-workbench .heading-actions{margin-top:8px;justify-content:flex-start}
+  body.subtitle-workbench .project-goal-controls .badge,body.subtitle-workbench #project-saved-at{display:none}
+  body.subtitle-workbench .tabs .tab{padding:6px;min-height:40px;font-size:11px}
+  body.subtitle-workbench .tabs .step-index{width:22px;height:22px;font-size:11px}
+  body.subtitle-workbench .subtitle-export-bar .button-group{gap:5px;flex-wrap:wrap}
+  body.subtitle-workbench .subtitle-export-bar button{font-size:11px;min-height:30px;padding:5px 8px}
+  body.subtitle-workbench .review-filters label:has(#subtitle-page-size){display:none}
+  body.subtitle-workbench .review-filters{flex-wrap:nowrap}
+  body.subtitle-workbench .review-filters>label:first-child{min-width:0;flex:1}
+  body.subtitle-workbench .review-filters input{min-width:0}
+  body.subtitle-workbench .review-selection-tools{gap:4px 8px}
+  body.subtitle-workbench .subtitle-review-toolbar button{font-size:11px;padding:3px 6px;min-height:26px}
+  body.subtitle-workbench #review-select-issues,body.subtitle-workbench #review-select-candidates{display:none}
+  body.subtitle-workbench .subtitle-board .review-table tr{padding:10px 0;gap:6px}
+  body.subtitle-workbench .subtitle-board .review-table td.review-cue{font-size:11px;gap:6px}
+  body.subtitle-workbench .subtitle-board .review-table td.review-cue small{font-size:11px}
+}

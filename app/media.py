@@ -78,11 +78,27 @@ def probe(path: Path, settings: Settings) -> dict:
     return dict(duration=duration, video=any(s["codec_type"] == "video" for s in streams), audio=any(s["codec_type"] == "audio" for s in streams), streams=streams)
 
 
-def ffmpeg(settings: Settings, arguments, log: Path, cancel: Event):
-    run([executable(settings.ffmpeg), "-hide_banner", "-nostdin", "-y", *arguments], log, cancel, poll_interval=.05)
+def ffmpeg(settings: Settings, arguments, log: Path, cancel: Event, *, duration=None, on_progress=None):
+    prefix=[executable(settings.ffmpeg),"-hide_banner","-nostdin","-y"]
+    if not on_progress or not duration or duration<=0:
+        run([*prefix,*arguments],log,cancel,poll_interval=.05)
+        return
+    import tempfile
+    log.parent.mkdir(parents=True,exist_ok=True)
+    handle,name=tempfile.mkstemp(prefix='ffmpeg-',suffix='.progress',dir=log.parent);os.close(handle)
+    path=Path(name);previous=[None]
+    def tick():
+        try:
+            values=dict(line.split('=',1) for line in path.read_text(encoding='utf-8').splitlines() if '=' in line)
+            seconds=min(float(duration),max(0,int(values.get('out_time_us',0))/1000000))
+        except (OSError,ValueError):return
+        if previous[0] is None or abs(seconds-previous[0])>=.1:
+            previous[0]=seconds;on_progress(seconds,duration)
+    try:run([*prefix,'-progress',str(path),'-nostats',*arguments],log,cancel,poll_interval=.1,on_tick=tick)
+    finally:path.unlink(missing_ok=True)
 
 
-def extract_audio(source: Path, destination: Path, settings: Settings, log: Path, cancel: Event, start=None, duration=None, sample_rate=24000):
+def extract_audio(source: Path, destination: Path, settings: Settings, log: Path, cancel: Event, start=None, duration=None, sample_rate=24000, progress_duration=None, on_progress=None):
     args = []
     if start is not None:
         args += ["-ss", str(start)]
@@ -90,7 +106,8 @@ def extract_audio(source: Path, destination: Path, settings: Settings, log: Path
     if duration is not None:
         args += ["-t", str(duration)]
     args += ["-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le", str(destination)]
-    ffmpeg(settings, args, log, cancel)
+    if on_progress:ffmpeg(settings,args,log,cancel,duration=progress_duration,on_progress=on_progress)
+    else:ffmpeg(settings,args,log,cancel)
 
 
 def wav_duration(path: Path) -> float:
