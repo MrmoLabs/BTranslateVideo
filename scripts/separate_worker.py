@@ -7,16 +7,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 from model_worker import block_network
-
-
-def atomic_json(path, value):
-    path = Path(path)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, path)
+from app.file_io import write_progress
 
 
 def separate(request):
@@ -84,7 +77,7 @@ def separate(request):
                     if keep:
                         write(bed[:-keep]); tail = bed[-keep:].copy()
                     else: tail = None
-                    atomic_json(request["progress"], dict(frames=written, total=target_frames, device=device))
+                    write_progress(request["progress"], dict(frames=written, total=target_frames, device=device))
                     print(f"BACKGROUND {written}/{target_frames}", flush=True)
                     extra = read_frames(block_frames - overlap_frames)
                     if not len(extra):
@@ -95,7 +88,7 @@ def separate(request):
                     write(np.zeros((min(rate, target_frames - written), channels), dtype=np.float32))
             if decoder.wait(timeout=20): raise RuntimeError("原音轨解码失败，请查看背景分离日志")
             os.replace(pending, output)
-            atomic_json(request["progress"], dict(frames=target_frames, total=target_frames, device=device))
+            write_progress(request["progress"], dict(frames=target_frames, total=target_frames, device=device))
             print("BACKGROUND complete", flush=True)
         finally:
             if decoder.poll() is None:
