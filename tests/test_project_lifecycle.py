@@ -49,6 +49,81 @@ def test_metadata_changes_reject_busy_invalid_and_conflicting_operations(tmp_pat
         assert client.get(f'/api/projects/{identifier}').json()['name']=='Keep me'
 
 
+def test_permanent_delete_only_removes_the_confirmed_trashed_project(tmp_path):
+    app = create_app(tmp_path / 'projects')
+    with TestClient(app) as client:
+        store = app.state.store
+        identifier = store.create('Remove me', 'en', 'course')['id']
+        sibling = store.folder(store.create('Keep me', 'ja', 'anime')['id'])
+        folder = store.folder(identifier)
+        original = tmp_path / 'original.mp4'
+        shared_voice = tmp_path / 'voices' / 'shared.wav'
+        shared_voice.parent.mkdir(exist_ok=True)
+        (folder / 'cache').mkdir()
+        (folder / 'history').mkdir()
+        for path in (
+            original, shared_voice, sibling / 'source.media', folder / 'source.media',
+            folder / 'subtitles.srt', folder / 'output.mp4', folder / 'cache' / 'speech.wav',
+            folder / 'history' / 'old.mp4',
+        ):
+            path.write_bytes(b'fixture')
+        store.update_runtime(identifier, progress=50)
+        assert (folder / 'project-state.json').exists()
+
+        project_url = f'/api/projects/{identifier}'
+        purge_url = project_url + '/permanent'
+        assert client.request('DELETE', purge_url, json={'revision': 0}).status_code == 409
+        assert client.request('DELETE', project_url, json={'revision': 0}).status_code == 200
+        assert client.request('DELETE', purge_url, json={'revision': 0}).status_code == 409
+        app.state.pipeline.events[identifier] = threading.Event()
+        try:
+            assert client.request('DELETE', purge_url, json={'revision': 1}).status_code == 409
+        finally:
+            app.state.pipeline.events.pop(identifier)
+        assert folder.exists()
+
+        response = client.request('DELETE', purge_url, json={'revision': 1})
+        assert response.status_code == 200 and response.json() == {'deleted': identifier}
+        assert client.get('/api/projects/trash').json() == []
+        assert client.post(project_url + '/restore', json={'revision': 1}).status_code == 404
+        assert not folder.exists()
+        assert (folder / 'project.json') not in store.state_files.cache
+        for path in (original, shared_voice, sibling / 'source.media'):
+            assert path.read_bytes() == b'fixture'
+
+
+def test_interrupted_permanent_delete_can_be_retried_but_not_restored(tmp_path, monkeypatch):
+    from app.store import shutil
+
+    app = create_app(tmp_path / 'projects')
+    with TestClient(app) as client:
+        store = app.state.store
+        identifier = store.create('Retry me', 'en', 'course')['id']
+        folder = store.folder(identifier)
+        cache = folder / 'cache'
+        cache.mkdir()
+        (cache / 'locked.wav').write_bytes(b'fixture')
+        project_url = f'/api/projects/{identifier}'
+        assert client.request('DELETE', project_url, json={'revision': 0}).status_code == 200
+
+        def simulate_lock(path):
+            assert path == cache
+            raise PermissionError('simulated open file')
+
+        with monkeypatch.context() as patch:
+            patch.setattr(shutil, 'rmtree', simulate_lock)
+            response = client.request('DELETE', project_url + '/permanent', json={'revision': 1})
+        assert response.status_code == 409
+        trash = client.get('/api/projects/trash').json()
+        assert trash[0]['id'] == identifier and trash[0]['purge_started'] is True
+        assert client.post(project_url + '/restore', json={'revision': 1}).status_code == 409
+        assert (cache / 'locked.wav').exists()
+
+        assert client.request('DELETE', project_url + '/permanent', json={'revision': 1}).status_code == 200
+        assert client.get('/api/projects/trash').json() == []
+        assert not folder.exists()
+
+
 def test_unavailable_projects_have_actionable_errors_and_preserve_drafts(tmp_path):
     app=create_app(tmp_path/'projects')
     with TestClient(app) as client:

@@ -449,7 +449,24 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             check_project_revision(project, data.revision)
             if not project.get("deleted_at"):
                 raise HTTPException(409, "此项目不在回收站中")
+            if project.get('purge_started'):
+                raise HTTPException(409, '已开始彻底删除，请在回收站重试')
             return store.update(identifier, deleted_at=None, metadata_revision=data.revision + 1)
+
+    @app.delete('/api/projects/{identifier}/permanent')
+    def purge_project(identifier: str, data: ProjectRevision):
+        with pipeline.lock, store.lock:
+            if pipeline.busy(identifier):
+                raise HTTPException(409, '项目处理中，请等当前阶段完成后再彻底删除')
+            project = store.read(identifier, include_deleted=True)
+            check_project_revision(project, data.revision)
+            if not project.get('deleted_at'):
+                raise HTTPException(409, '请先将项目移入回收站')
+            try:
+                store.purge(identifier)
+            except OSError as error:
+                raise HTTPException(409, '部分项目文件无法删除，请关闭占用文件的程序后在回收站重试') from error
+            return {'deleted': identifier}
 
     def project_log(identifier):
         log = store.folder(identifier) / "process.log"

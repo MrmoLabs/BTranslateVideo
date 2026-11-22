@@ -322,7 +322,11 @@ renderProjectList=function(){
   $('#trash-note').hidden=!state.projectTrash;
   $('#projects-active').classList.toggle('selected',!state.projectTrash);$('#projects-trash').classList.toggle('selected',state.projectTrash);
   if(key===state.projectIndexKey)return;state.projectIndexKey=key;
-  $('#project-list').innerHTML=items.map(p=>`<article class="project-card card"><div class="project-card-top"><span class="badge">${esc(projectProductLabel(p))}</span><span class="subtle">${esc(p.mode==='anime'?tr('动漫'):tr('课程'))}</span></div><h2>${state.projectTrash?esc(p.name):`<button class="project-open" data-open-project="${p.id}">${esc(p.name)}</button>`}</h2><p class="subtle">${esc(languageName(p.language))} → ${esc(languageName(targetLanguage(p)))}</p><p class="subtle project-last-task">${esc(tr('最近操作：{0}',tr(labels[p.status]||p.status)))}</p><p class="project-updated subtle">${esc(tr('更新于 {0}',new Date(p.updated).toLocaleString(I18N.locale())))}</p><div class="project-card-actions">${state.projectTrash?`<button data-restore-project="${p.id}">${esc(tr('恢复项目'))}</button>`:`<button data-open-project="${p.id}" class="primary">${esc(tr('打开项目'))}</button><button data-rename-project="${p.id}" ${active(p)?'disabled':''}>${esc(tr('重命名'))}</button><button data-delete-project="${p.id}" class="text-button danger-text" ${active(p)?'disabled':''}>${esc(tr('删除'))}</button>`}</div></article>`).join('')||`<div class="card project-empty"><h2>${esc(tr(state.projectTrash?'回收站为空':'没有匹配的项目'))}</h2><p class="subtle">${esc(tr(state.projectTrash?'删除的项目会在这里显示，可随时恢复。':'导入一个视频，就可以开始第一个项目。'))}</p></div>`;
+  const trashActions=p=>{
+    const restore=p.purge_started?'':`<button data-restore-project="${p.id}">${esc(tr('恢复项目'))}</button>`;
+    return `${restore}<button data-purge-project="${p.id}" class="text-button danger-text">${esc(tr(p.purge_started?'重试彻底删除':'彻底删除'))}</button>`;
+  };
+  $('#project-list').innerHTML=items.map(p=>`<article class="project-card card"><div class="project-card-top"><span class="badge">${esc(projectProductLabel(p))}</span><span class="subtle">${esc(p.mode==='anime'?tr('动漫'):tr('课程'))}</span></div><h2>${state.projectTrash?esc(p.name):`<button class="project-open" data-open-project="${p.id}">${esc(p.name)}</button>`}</h2><p class="subtle">${esc(languageName(p.language))} → ${esc(languageName(targetLanguage(p)))}</p><p class="subtle project-last-task">${esc(tr('最近操作：{0}',tr(labels[p.status]||p.status)))}</p><p class="project-updated subtle">${esc(tr('更新于 {0}',new Date(p.updated).toLocaleString(I18N.locale())))}</p><div class="project-card-actions">${state.projectTrash?trashActions(p):`<button data-open-project="${p.id}" class="primary">${esc(tr('打开项目'))}</button><button data-rename-project="${p.id}" ${active(p)?'disabled':''}>${esc(tr('重命名'))}</button><button data-delete-project="${p.id}" class="text-button danger-text" ${active(p)?'disabled':''}>${esc(tr('删除'))}</button>`}</div></article>`).join('')||`<div class="card project-empty"><h2>${esc(tr(state.projectTrash?'回收站为空':'没有匹配的项目'))}</h2><p class="subtle">${esc(tr(state.projectTrash?'删除的项目会在这里显示，可随时恢复。':'导入一个视频，就可以开始第一个项目。'))}</p></div>`;
 };
 $('#project-search').oninput=renderProjectList;
 $('#projects-active').onclick=()=>{state.projectTrash=false;renderProjectList();};
@@ -334,17 +338,50 @@ $('#project-name-form').onsubmit=async e=>{
   try{const data=await api('/api/projects/'+project.id,json('PATCH',{name:$('#project-name-input').value.trim(),revision:project.metadata_revision||0}));if(state.id===data.id){state.project.name=data.name;state.project.metadata_revision=data.metadata_revision;render(false);}$('#project-name-dialog').close();await refreshList();}
   catch(error){$('#project-name-error').textContent=error.message;}finally{button.disabled=false;}
 };
+function closeDeletedProject(id){
+  if(state.id!==id)return;
+  ++state.selectionVersion;state.id=null;state.project=null;state.rows=[];state.audioDirty=false;state.projectDetail=false;setDirty(false);
+  try{localStorage.removeItem('btv-project');}catch{}
+}
 $('#project-list').onclick=e=>guard(async()=>{
-  const button=e.target.closest('button');if(!button)return;
+  const button=e.target.closest('button');if(!button||button.disabled)return;
   if(button.dataset.openProject){await selectProject(button.dataset.openProject);return;}
   if(button.dataset.renameProject){openProjectName(state.projects.find(p=>p.id===button.dataset.renameProject));return;}
-  const id=button.dataset.deleteProject||button.dataset.restoreProject;if(!id)return;
+  const id=button.dataset.deleteProject||button.dataset.restoreProject||button.dataset.purgeProject;if(!id)return;
   const project=(button.dataset.deleteProject?state.projects:state.trashProjects).find(p=>p.id===id);if(!project)return;
+  if(button.dataset.purgeProject){
+    button.disabled=true;
+    try{
+      const choice=await confirmChoice(tr('彻底删除“{0}”？将删除项目目录里的素材、字幕、缓存和导出文件，无法恢复。',project.name),{title:tr('彻底删除项目'),proceed:tr('彻底删除')});
+      if(choice==='cancel')return;
+      try{
+        await api('/api/projects/'+id+'/permanent',json('DELETE',{revision:project.metadata_revision||0}));
+      }catch(error){
+        try{state.trashProjects=await api('/api/projects/trash');renderProjectList();}catch{}
+        error.message=tr(error.message);
+        throw error;
+      }
+      if(state.id===id){pauseMedia();closeDeletedProject(id);}
+      clearProjectDraft(id);
+      if(subtitleReview.project===id)subtitleReview.project=null;
+      subtitleReview.memory.delete(id);
+      try{localStorage.removeItem('btv-subtitle-review:'+id);}catch{}
+      const roleDrafts=Object.keys(roleNames.drafts||{}).filter(key=>key.startsWith(id+':'));
+      if(roleDrafts.length){
+        for(const key of roleDrafts)delete roleNames.drafts[key];
+        saveRoleNameDrafts();
+      }
+      state.trashProjects=state.trashProjects.filter(p=>p.id!==id);
+      renderProjectList();
+      toast(tr('项目已彻底删除'));
+    }finally{button.disabled=false;}
+    return;
+  }
   if(button.dataset.deleteProject){
     if(await confirmChoice(tr('将“{0}”移入回收站？素材和处理结果会保留，可随时恢复。',project.name),{title:tr('删除项目'),proceed:tr('移入回收站')})==='cancel')return;
     if(state.id===id){if(!await allowLeave())return;if(state.id!==id)return;pauseMedia();}
     await api('/api/projects/'+id,json('DELETE',{revision:project.metadata_revision||0}));
-    if(state.id===id){++state.selectionVersion;state.id=null;state.project=null;state.rows=[];state.audioDirty=false;state.projectDetail=false;setDirty(false);try{localStorage.removeItem('btv-project');}catch{}}
+    closeDeletedProject(id);
     toast(tr('项目已移入回收站，可随时恢复'));
   }else{await api('/api/projects/'+id+'/restore',json('POST',{revision:project.metadata_revision||0}));state.trashProjects=await api('/api/projects/trash');toast(tr('项目已恢复'));}
   await refreshList();showSection('projects');

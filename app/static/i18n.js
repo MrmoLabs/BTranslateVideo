@@ -21,7 +21,7 @@ const I18N=(()=>{
       Object.entries(attributes).forEach(([name,source])=>element.setAttribute(name,tr(source)));
     });
   }
-  const ready=fetch('/static/locales/en.json?v=20261117-tools4').then(response=>{
+  const ready=fetch('/static/locales/en.json?v=20261122-project-trash').then(response=>{
     if(!response.ok)throw Error('UI language catalog could not be loaded');
     return response.json();
   }).then(value=>{english=value;setLocale(current);applyStatic();}).catch(()=>{setLocale('zh-CN');applyStatic();const chooser=document.getElementById?.('ui-language');if(chooser)chooser.value='zh-CN';});

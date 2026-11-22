@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import shutil
+import stat
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +15,10 @@ from .project_state import ProjectStateFiles,RUNTIME_FIELDS
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def is_junction(path: Path):
+    return getattr(path.lstat(), 'st_reparse_tag', None) == stat.IO_REPARSE_TAG_MOUNT_POINT
 
 
 class ProjectUnavailable(FileNotFoundError):
@@ -86,6 +92,43 @@ class Store:
             logs = data.get("logs", []) + [dict(time=now(), message=message)]
             self.update_runtime(identifier, logs=logs[-200:])
 
+    def purge(self, identifier: str):
+        """Remove only a trashed project's own files, retaining its entry for retries."""
+        with self.lock:
+            folder = self.folder(identifier)
+            expected = self.root.resolve() / identifier
+            if folder.is_symlink() or is_junction(folder) or folder.resolve() != expected:
+                raise ValueError('彻底删除仅允许项目目录中的普通文件夹')
+            project = self.read(identifier, include_deleted=True)
+            if not project.get('deleted_at'):
+                raise ValueError('请先将项目移入回收站')
+            manifest = folder / 'project.json'
+            if manifest.is_symlink():
+                raise ValueError('项目清单不能是符号链接')
+            if not project.get('purge_started'):
+                project = self.update(identifier, purge_started=True)
+            for entry in folder.iterdir():
+                if entry == manifest:
+                    continue
+                if entry.is_symlink():
+                    entry.unlink(missing_ok=True)
+                elif is_junction(entry):
+                    entry.rmdir()
+                elif entry.is_dir():
+                    if entry.resolve() != expected / entry.name:
+                        raise ValueError('目录指向项目范围之外，彻底删除已暂停')
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink(missing_ok=True)
+            manifest.unlink()
+            self.state_files.forget(manifest)
+            try:
+                folder.rmdir()
+            except OSError:
+                if folder.is_dir() and not folder.is_symlink() and not is_junction(folder) and folder.resolve() == expected:
+                    atomic_json(manifest, project)
+                raise
+
     def list(self, *, deleted: bool = False) -> list[dict]:
         result = []
         for folder in self.root.iterdir():
@@ -95,7 +138,7 @@ class Store:
                     if bool(data.get("deleted_at")) != deleted:
                         continue
                     from .project_experience import summary
-                    result.append({**{key: data[key] for key in ("id", "name", "language", "mode", "status", "stage", "progress", "updated", "error")}, "target_language": data.get("target_language", "zh"), "metadata_revision": data.get("metadata_revision", 0), "deleted_at": data.get("deleted_at"), "processing":data.get("processing"), 'goal':data.get('goal','dub'), 'workflow':summary(data)})
+                    result.append({**{key: data[key] for key in ("id", "name", "language", "mode", "status", "stage", "progress", "updated", "error")}, "target_language": data.get("target_language", "zh"), "metadata_revision": data.get("metadata_revision", 0), "deleted_at": data.get("deleted_at"), "purge_started": bool(data.get("purge_started")), "processing":data.get("processing"), 'goal':data.get('goal','dub'), 'workflow':summary(data)})
                 except (ValueError, OSError, KeyError):
                     continue
         return sorted(result, key=lambda data: data["updated"], reverse=True)
