@@ -47,6 +47,9 @@ def generate_candidate(pipeline,identifier,project,row,index,request,settings,ca
     pipeline.tts.release('为单句识别或校对释放显存')
     source=row['text'];reason='';checks=[]
     context=translation_context(project['segments'],[index],settings)
+    if mode=='shorten':
+        from .dubbing_translation import shorten_to_alignment
+        return shorten_to_alignment(project,row,context,settings,folder/'process.log',cancel)
     if mode=='asr':
         from .pipeline import offline_env
         from .model_backends import transcribe

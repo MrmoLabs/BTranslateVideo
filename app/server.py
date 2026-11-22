@@ -76,7 +76,7 @@ class RenameProjectRole(ProjectRolePayload):
 
 class RetranslatePayload(ProjectRevision):
     segment_id: int = Field(gt=0)
-    mode: Literal['translate','asr','source','translation','both'] = 'translate'
+    mode: Literal['translate','asr','source','translation','both','shorten'] = 'translate'
 
 class ApplyRetranslationPayload(ProjectRevision):
     request_id: str
@@ -603,7 +603,12 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         with pipeline.lock:
             editable(identifier);project=store.read(identifier)
             if data.revision!=project.get('edit_revision',0):raise HTTPException(409,'字幕已经更新，请保留当前修改后重试')
-            if data.segment_id not in {row['id'] for row in project['segments']}:raise ValueError('请选择当前项目中的句子')
+            row=next((row for row in project['segments'] if row['id']==data.segment_id),None)
+            if not row:raise ValueError('请选择当前项目中的句子')
+            if data.mode=='shorten':
+                from .dubbing_translation import measured_conflict
+                if not measured_conflict(project,row) or target_code(project) not in {'en','ja'} or not row['zh'].strip():
+                    raise ValueError('请先生成英日语配音，选择存在实测时长冲突的句子')
             request_id=uuid.uuid4().hex[:24]
             store.update(identifier,retranslation_request=dict(id=request_id,segment_id=data.segment_id,revision=data.revision,mode=data.mode),retranslation=None)
             pipeline.submit(identifier,'retranslate',load_settings())

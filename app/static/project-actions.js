@@ -31,7 +31,7 @@ function showRetranslation(){
   const result=state.project?.retranslation;if(!result||result.status!=='ready')return;
   state.retranslationDialog={project:state.id,request:result.request_id};
   const mode=result.mode||'translate',sourceMode=['asr','source','both'].includes(mode);
-  const names={translate:tr('重新翻译'),asr:tr('重新识别原文'),source:tr('润色原文'),translation:tr('润色译文'),both:tr('联合校对')};
+  const names={translate:tr('重新翻译'),asr:tr('重新识别原文'),source:tr('润色原文'),translation:tr('润色译文'),both:tr('联合校对'),shorten:tr('按实测时长生成短稿')};
   $('#retranslation-title').textContent=tr('第 {0} 句 · {1}',result.segment_id,names[mode]);
   $('#retranslation-source-compare').hidden=!sourceMode;$('#retranslation-source').hidden=sourceMode;
   $('#retranslation-original-source').textContent=result.source;$('#retranslation-new-source').textContent=result.after_source??result.source;

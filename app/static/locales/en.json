@@ -720,6 +720,7 @@
   "核对换人位置 {0}": "Review speaker change at {0}",
   "采用拆句": "Apply this split",
   "采用拆句，清空本句旧译文": "Apply the split and clear the old translation",
+  "按实测时长生成短稿": "Draft a shorter line for the measured duration",
   "无法连接 B 站官方翻译 API，请检查网络后重试": "Could not reach the Bilibili translation API. Check the network connection and try again.",
   "本地兼容语音接口": "Local compatible speech API",
   "本地参考音桥接 · BTV v1": "Local reference-audio bridge · BTV v1",
