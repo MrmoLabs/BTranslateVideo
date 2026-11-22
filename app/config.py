@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "projects"
 SETTINGS = ROOT / "settings.local.json"
+BILIBILI_TRANSLATION_URL = "https://index-translate.bilibili.com/v1"
+BILIBILI_TRANSLATION_MODEL = "Index-Translate-35B-A3B"
 
 
 class Settings(BaseModel):
@@ -25,7 +27,7 @@ class Settings(BaseModel):
     asr_name: str = 'whisper-1'
     asr_revision: str = ''
     translation_revision: str = ''
-    translation_provider: Literal['auto', 'llama_cpp', 'openai'] = 'auto'
+    translation_provider: Literal['auto', 'llama_cpp', 'openai', 'bilibili'] = 'auto'
     translation_json_mode: bool = True
     tts_provider: Literal['indextts', 'openai_speech', 'btv_reference'] = 'indextts'
     tts_url: str = ''
@@ -67,6 +69,14 @@ class Settings(BaseModel):
     translation_review: str = "auto"
     translation_compact: bool = True
     glossary: str = Field(default="", max_length=20000)
+
+    @property
+    def translation_service_url(self) -> str:
+        return BILIBILI_TRANSLATION_URL if self.translation_provider == 'bilibili' else self.translation_url
+
+    @property
+    def translation_model_id(self) -> str:
+        return BILIBILI_TRANSLATION_MODEL if self.translation_provider == 'bilibili' else self.translation_name
 
     @field_validator("translation_review")
     @classmethod
@@ -182,7 +192,7 @@ def diagnostics(settings: Settings) -> dict:
         "ffmpeg": tool(settings.ffmpeg),
         "ffprobe": tool(settings.ffprobe),
         "llama": str(llama) if llama else None,
-        "local_only": True,
+        "local_only": settings.translation_provider != 'bilibili',
         "separation_ready": separation_python().is_file() and all((resolve(settings.separation_model) / name).is_file() for name in ["config.json", "htdemucs.safetensors", "manifest.json"]),
     }
 

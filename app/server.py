@@ -472,9 +472,11 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             data = store.read(identifier)
             _,digest=store.state_files.read(store.folder(identifier)/'project.json')
         from .translation_checks import project_language_checks
+        from .segmentation import boundary_checks
         from .human_review import normalized
         data['segments'] = normalized(data['segments'])
         data['translation_checks']=project_language_checks(data)
+        data['boundary_checks']=boundary_checks(data['segments'])
         data['content_version']=digest
         data['process_log']=project_log(identifier)
         from .project_experience import enrich

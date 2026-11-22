@@ -11,12 +11,14 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import BILIBILI_TRANSLATION_MODEL, BILIBILI_TRANSLATION_URL, Settings
 from app.media import Cancelled, wav_duration
 from app.model_backends import (catalog, chat_payload, check_backend, parse_transcription,
     synthesize_service, transcribe, tts_model_signature, validate_tts)
 from app.pipeline import Pipeline, make_voice_clip
 from app.server import create_app
+from app.translation import local_translator
+from app.translation_quality import run_workflow
 
 
 def audio(rate=22050):
@@ -50,6 +52,89 @@ def test_legacy_settings_and_local_only_validation():
     with pytest.raises(ValidationError):Settings(asr_provider='openai')
     with pytest.raises(ValidationError):service(tts_languages='unknown')
     assert service(tts_languages=' en,zh,en ').tts_languages=='en,zh'
+
+
+def test_bilibili_preset_uses_official_endpoint_and_preserves_local_settings(monkeypatch, tmp_path):
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert str(request.url) == BILIBILI_TRANSLATION_URL + '/chat/completions'
+        payload = json.loads(request.content)
+        assert payload['model'] == BILIBILI_TRANSLATION_MODEL
+        assert payload['chat_template_kwargs'] == {'enable_thinking': False}
+        if len(seen) > 1:
+            assert payload['response_format'] == {'type': 'json_object'}
+        return httpx.Response(200, json={'choices': [{'message': {
+            'content': '{"1":"Hello world."}',
+        }}]})
+
+    mock_async(monkeypatch, handler)
+    settings = Settings(translation_provider='bilibili', translation_url='http://localhost:9000/v1',
+                        translation_name='local-model', translation_review='off')
+    assert settings.model_dump()['translation_name'] == 'local-model'
+    assert settings.model_dump()['translation_url'] == 'http://localhost:9000/v1'
+    for field in ('translation_url', 'asr_url', 'tts_url'):
+        with pytest.raises(ValidationError):
+            Settings(translation_provider='bilibili', **{field: 'https://example.com/v1'})
+    probe = check_backend('translation', settings)
+    assert probe['ok'] and probe['level'] == 'inference'
+    probe_prompt = json.loads(seen[0].content)['messages'][-1]['content']
+    probe_source = probe_prompt.split('〖源文〗\n',1)[1].split('\n\n',1)[0]
+    assert json.loads(probe_source) == {'1': '你好，世界。'}
+    rows = [dict(id=19, start=0, end=5, text='你好，世界。', zh='', speaker='speaker_1')]
+    with local_translator(settings, tmp_path / 'process.log', threading.Event()) as url:
+        output = run_workflow(url, settings, rows, [], 'course', threading.Event(),
+                              topic={'language': 'zh', 'target_language': 'en'})
+    assert output[19]['zh'] == 'Hello world.'
+    assert len(seen) == 2
+
+
+def test_bilibili_probe_reports_upstream_http_failure_without_following_redirect(monkeypatch):
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(302, headers={'location': 'https://example.com/v1/chat/completions'})
+
+    mock_async(monkeypatch, handler)
+    result = check_backend('translation', Settings(translation_provider='bilibili'))
+    assert result['ok'] is False and 'HTTP 302' in result['message']
+    assert len(seen) == 1
+
+
+def test_bilibili_retries_invalid_translation_using_the_original_id_map(monkeypatch):
+    prompts = []
+
+    def handler(request):
+        prompts.append(json.loads(request.content)['messages'][0]['content'])
+        text = 'Retry as needed.' if len(prompts) == 1 else 'Retry up to 3 times.'
+        return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps({'1': text})}}]})
+
+    mock_async(monkeypatch, handler)
+    settings = Settings(translation_provider='bilibili', translation_review='off')
+    rows = [dict(id=19, start=0, end=5, text='最多重试3次。', zh='', speaker='speaker_1')]
+    output = run_workflow(BILIBILI_TRANSLATION_URL, settings, rows, [], 'course', threading.Event(),
+                          topic={'language': 'zh', 'target_language': 'en'})
+    assert output[19]['zh'] == 'Retry up to 3 times.'
+    assert len(prompts) == 2 and 'Retry as needed.' in prompts[1]
+
+
+def test_bilibili_settings_roundtrip_keeps_local_fallback(tmp_path, monkeypatch):
+    path = tmp_path / 'settings.json'
+    monkeypatch.setattr('app.server.SETTINGS', path)
+    monkeypatch.setattr('app.config.SETTINGS', path)
+    with TestClient(create_app(tmp_path / 'projects')) as client:
+        local = dict(translation_provider='openai', translation_url='http://127.0.0.1:8000/v1',
+                     translation_name='local-chat')
+        cloud = {**local, 'translation_provider': 'bilibili'}
+        assert client.put('/api/settings', json=cloud).status_code == 200
+        saved = client.get('/api/settings').json()
+        assert {key: saved[key] for key in cloud} == cloud
+        assert not path.read_bytes().startswith(b'\xef\xbb\xbf')
+        assert client.get('/api/diagnostics').json()['local_only'] is False
+        assert client.put('/api/settings', json=local).status_code == 200
+        assert client.get('/api/diagnostics').json()['local_only'] is True
 
 
 def test_model_identity_and_capability_gate(tmp_path):

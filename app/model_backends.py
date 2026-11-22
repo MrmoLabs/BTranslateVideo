@@ -1,4 +1,4 @@
-"""Local adapter boundary. Services run under the user's control, never auto-downloaded.
+"""Adapter boundary for native models, local services and the Bilibili translation API.
 
 Only the native adapters own model processes. HTTP adapters own requests, not servers.
 """
@@ -39,7 +39,8 @@ BACKENDS = {
             Backend('openai', '本地兼容识别接口', word_timestamps=True)],
     'translation': [Backend('auto', '自动兼容旧配置', local_process=True),
                     Backend('llama_cpp', 'llama.cpp 本地 GGUF', local_process=True),
-                    Backend('openai', '本地兼容对话接口')],
+                    Backend('openai', '本地兼容对话接口'),
+                    Backend('bilibili', 'B 站官方翻译 API')],
     'tts': [Backend('indextts', 'IndexTTS', local_process=True, reference_audio=True, emotions=True),
             Backend('openai_speech', '本地兼容语音接口'),
             Backend('btv_reference', '本地参考音桥接 · BTV v1', reference_audio=True, emotions=True)],
@@ -51,13 +52,13 @@ def catalog():
 
 
 def uses_translation_service(settings):
-    return settings.translation_provider == 'openai' or (settings.translation_provider == 'auto' and bool(settings.translation_url))
+    return settings.translation_provider in {'openai', 'bilibili'} or (settings.translation_provider == 'auto' and bool(settings.translation_url))
 
 
 def chat_payload(settings, payload):
     """Do not send llama.cpp-specific fields to a generic OpenAI-compatible server."""
     payload = dict(payload)
-    if uses_translation_service(settings):
+    if uses_translation_service(settings) and settings.translation_provider != 'bilibili':
         payload.pop('chat_template_kwargs', None)
     if not settings.translation_json_mode:
         payload.pop('response_format', None)
@@ -100,7 +101,7 @@ def model_readiness(settings):
                 'hf_cache/bigvgan/config.json', 'hf_cache/bigvgan/bigvgan_generator.pt']
     llama = llama_path(settings)
     return dict(asr_ready=bool(settings.asr_url) if settings.asr_provider == 'openai' else fun_asr_ready(settings) if settings.asr_provider == 'fun_asr' else (resolve(settings.asr_model)/'model.bin').is_file(),
-        translation_ready=bool(settings.translation_url) if uses_translation_service(settings) else bool(llama and llama.is_file() and resolve(settings.translation_model).is_file()),
+        translation_ready=bool(settings.translation_service_url) if uses_translation_service(settings) else bool(llama and llama.is_file() and resolve(settings.translation_model).is_file()),
         tts_ready=(index_python(settings).is_file() and all((model/name).is_file() for name in required)) if native else bool(settings.tts_url),
         service_configured=any([settings.asr_provider == 'openai', uses_translation_service(settings), not native]),
         backends={'asr':settings.asr_provider, 'translation':settings.translation_provider, 'tts':settings.tts_provider})
@@ -231,6 +232,22 @@ def synthesize_service(settings,clips,total,folder,cancel,progress):
 def check_backend(stage,settings):
     if stage not in BACKENDS:raise ValueError('无效模型阶段')
     provider=getattr(settings,stage+'_provider')
+    if stage == 'translation' and provider == 'bilibili':
+        from threading import Event
+        from .translation import _post_cancellable, parse_translation
+        from .translation_quality import bilibili_subtitle_prompt
+
+        prompt = bilibili_subtitle_prompt('en', {1: '你好，世界。'})
+        payload = dict(model=settings.translation_model_id, messages=[dict(role='user', content=prompt)],
+                       temperature=0, max_tokens=128, stream=False, chat_template_kwargs={'enable_thinking': False})
+        try:
+            response = asyncio.run(_post_cancellable(settings.translation_service_url + '/chat/completions', payload, Event(), read_timeout=25))
+            parse_translation(response.json()['choices'][0]['message']['content'], [1], allow_id_map=True)
+        except RuntimeError as error:
+            return dict(ok=False, level='connection', message=str(error))
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            return dict(ok=False, level='inference', message='B 站 API 已响应，但测试译文未通过字幕格式检查')
+        return dict(ok=True, level='inference', message='B 站 API 测试翻译通过')
     native=(stage=='asr' and provider in {'faster_whisper','fun_asr'} or stage=='tts' and provider=='indextts'
             or stage=='translation' and not uses_translation_service(settings))
     if native:

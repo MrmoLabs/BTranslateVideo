@@ -9,9 +9,11 @@ function updateModelControls(){
   const form=$('#settings-form');
   for(const stage of ['asr','translation','tts']){
     const value=form.elements[stage+'_provider'].value;
+    const native=stage==='tts'?value==='indextts':value!=='openai';
     for(const group of $$(`[data-backend-stage="${stage}"]`)){
-      const native=stage==='asr'?value!=='openai':stage==='tts'?value==='indextts':value!=='openai';
-      group.hidden=group.dataset.backendProvider?group.dataset.backendProvider!==value:value==='auto'?false:group.dataset.backendKind==='native'?!native:native;
+      if(group.dataset.backendProvider)group.hidden=group.dataset.backendProvider!==value;
+      else if(value==='bilibili')group.hidden=true;
+      else group.hidden=value!=='auto'&&(group.dataset.backendKind==='native'?!native:native);
     }
   }
   const tts=form.elements.tts_provider.value;

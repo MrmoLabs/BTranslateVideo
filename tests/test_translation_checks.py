@@ -130,3 +130,8 @@ def test_explicit_equivalent_clock_formats(source,translated):
 ])
 def test_clock_equivalence_never_waives_changed_time_or_quantity(source,translated):
     with pytest.raises(TranslationValidationError):validate_values([row(source)],{17:{'zh':translated}})
+@pytest.mark.parametrize(('target','translation'), [('en','Retry at least 3 times.'),('ja','最低3回再試行します。')])
+def test_chinese_numeric_upper_bound_is_not_reversed(target,translation):
+    from app.translation_checks import TranslationValidationError, validate_values
+    with pytest.raises(TranslationValidationError,match='上限和下限'):
+        validate_values([dict(id=1,text='最多重试3次。')],{1:dict(zh=translation)},target)

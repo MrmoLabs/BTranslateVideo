@@ -208,8 +208,36 @@ def test_existing_v6_cache_is_validated_and_reused(tmp_path, monkeypatch):
     monkeypatch.setattr("app.segmentation.plan_block", lambda *_: pytest.fail("must reuse validated cache"))
     result = semantic_segments(raw_words("keep all words"), 20, "unused", settings, "course", Event(), tmp_path)
     assert result[0]["text"] == "Keep all words."
-    assert VERSION == 10
+    assert VERSION >= 11
     assert len(list(tmp_path.glob("sentences-*.json"))) == 2
+
+
+def test_context_is_read_only_and_sent_in_both_planner_protocols(monkeypatch):
+    from app.segmentation import plan_block
+    import httpx
+
+    words=flatten_words(raw_words('check the logs'),5)
+    seen=[]
+    async def response(_url,payload,_cancel):
+        seen.append(payload['messages'])
+        content='{}' if len(seen)<3 else '{"cuts":[{"end":3,"punct":"."}]}'
+        return httpx.Response(200,json={'choices':[{'message':{'content':content}}]},request=httpx.Request('POST','http://testserver'))
+    monkeypatch.setattr('app.segmentation._post_cancellable',response)
+    cuts=plan_block('http://testserver',Settings(),words,{'before':'First restart it.','after':'Then check memory.'},'course',Event())
+    assert cuts[-1]['end']==3
+    for messages in (seen[0],seen[-1]):
+        content=next(item['content'] for item in reversed(messages) if 'First restart it.' in item['content'])
+        assert json.loads(content.split('\n/no_think')[0])['after']=='Then check memory.'
+
+
+def test_chinese_condition_and_consequence_are_rejoined():
+    from app.segmentation import parse_cuts
+    raw=raw_words('如果 真有问题 就重启 服务')
+    words=flatten_words(raw,5)
+    plan='{"cuts":[{"end":2,"punct":"。"},{"end":4,"punct":"。"}]}'
+    repaired=parse_cuts(plan,words,repair=True)
+    assert [part['end'] for part in repaired]==[4]
+    assert lexical(repaired[0]['text'])==lexical(raw[0]['text'])
 
 
 def test_minute_coding_pause_is_a_batch_boundary_after_complete_thought(tmp_path, monkeypatch):

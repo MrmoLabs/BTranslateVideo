@@ -26,13 +26,13 @@ def generate_proposal(store,identifier,settings,cancel,progress):
     folder=store.folder(identifier); topic=dict(title=project["name"],language=project["language"],target_language=target_code(project),mode=project["mode"])
     model=resolve(settings.translation_model)
     model_id=(str(model),model.stat().st_size,model.stat().st_mtime_ns) if model.is_file() else str(model)
-    signature=digest([VERSION,segments,project.get("edit_revision",0),topic,model_id,settings.translation_name,settings.glossary,settings.translation_compact,settings.translation_url] + ([settings.translation_revision] if settings.translation_revision else []))
+    signature=digest([VERSION,segments,project.get("edit_revision",0),topic,model_id,settings.translation_model_id,settings.glossary,settings.translation_compact,settings.translation_service_url] + ([settings.translation_revision] if settings.translation_revision else []))
     journal=folder/"cache"/("proposal-"+signature+".json")
     records={}
     if journal.is_file():
         try: records={int(k):v for k,v in json.loads(journal.read_text(encoding="utf-8")).items()}
         except (ValueError,TypeError): records={}
-    progress(identifier,"optimize",2,"本地生成语序与语义优化建议；原译文、配音和成片保持可用")
+    progress(identifier,"optimize",2,"生成语序与语义优化建议；原译文、配音和成片保持可用")
     pending=[i for i in indices if segments[i]["id"] not in records]
     if pending:
         with local_translator(settings,folder/"process.log",cancel) as url:
@@ -40,7 +40,7 @@ def generate_proposal(store,identifier,settings,cancel,progress):
                 batch=[segments[i] for i in group]
                 failures={}
                 def failed(row,error):failures[row["id"]]=str(error)[:1000]
-                result=run_workflow(url,settings,batch,translation_context(segments,group),project["mode"],cancel,existing=True,topic=topic,cache=folder/"cache",on_failure=failed)
+                result=run_workflow(url,settings,batch,translation_context(segments,group,settings),project["mode"],cancel,existing=True,topic=topic,cache=folder/"cache",on_failure=failed)
                 check_cancel(cancel)
                 for row in batch:
                     item=result.get(row["id"])

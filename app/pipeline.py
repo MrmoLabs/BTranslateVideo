@@ -397,7 +397,7 @@ class Pipeline:
                 on_progress=lambda value:self.progress(identifier,stage,10,value.get('message','识别原文'),value))
             atomic_json(meta_path, metadata)
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
-        self.progress(identifier, stage, 40, "本地模型恢复完整句子，校验全部原词与时间轴",dict(phase="segmentation_model"))
+        self.progress(identifier, stage, 40, "模型恢复完整句子，校验全部原词与时间轴",dict(phase="segmentation_model"))
         self.tts.release("为本地翻译释放显存")
         with local_translator(settings, folder / "process.log", cancel) as url:
             segments = semantic_segments(raw, project["media"]["duration"], url, settings, project["mode"], cancel, folder / "cache", lambda done, total: self.progress(identifier, stage, 40 + round(done / total * 55), f"语义断句 {done}/{total} 词",dict(phase="segmentation",done=done,total=total,unit="words")))
@@ -421,7 +421,7 @@ class Pipeline:
         if not pending:
             self.store.log(identifier, "已有全部译文，保留校对结果")
             return
-        self.progress(identifier, "translate", 5, "载入本地翻译模型；已完成译文将被保留")
+        self.progress(identifier, "translate", 5, "准备翻译模型；已完成译文将被保留")
         self.tts.release("为本地翻译释放显存")
         with local_translator(settings, self.store.folder(identifier) / "process.log", cancel) as url:
             completed = skipped = translated = 0
@@ -432,7 +432,7 @@ class Pipeline:
                 def failed(row,error):
                     # Keep invalid output out of the editable translation and audio.
                     failures[row['id']]=str(error)[:1000]
-                result = translate_batch(url, settings, batch, translation_context(segments, indices), project["mode"], cancel,
+                result = translate_batch(url, settings, batch, translation_context(segments, indices, settings), project["mode"], cancel,
                     cache=self.store.folder(identifier) / "cache", topic=dict(title=project["name"], language=project["language"], target_language=target_code(project), mode=project["mode"]),on_checks=batch_checks.update,on_failure=failed)
                 check_cancel(cancel)
                 for index in indices:
@@ -482,7 +482,7 @@ class Pipeline:
         self.progress(identifier,'retranslate',0,f"重新翻译第 {row['id']} 句；原译文保持不变",dict(phase='translation_batches',done=0,total=1,unit='segments'))
         self.tts.release('为单句翻译释放显存')
         with local_translator(settings,folder/'process.log',cancel) as url:
-            result=run_workflow(url,settings,[row],translation_context(project['segments'],[index]),project['mode'],cancel,existing=True,
+            result=run_workflow(url,settings,[row],translation_context(project['segments'],[index],settings),project['mode'],cancel,existing=True,
                 topic=dict(title=project['name'],language=project['language'],target_language=target_code(project),mode=project['mode']),cache=None)
         check_cancel(cancel)
         current=self.store.read(identifier)
