@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from app.config import Settings
-from app.diarization import DiarizationOptions, match_segments, validate_turns, overlap_windows, readiness
+from app.diarization import DiarizationOptions, add_split_suggestions, match_segments, validate_turns, overlap_windows, readiness, source_identity
 from app.media import Cancelled, check_cancel
 from app.server import create_app
 
@@ -100,6 +100,35 @@ def audio_frequency(content):
     with wave.open(io.BytesIO(content),'rb') as stream:
         rate=stream.getframerate();values=np.frombuffer(stream.readframes(stream.getnframes()),dtype='<i2').astype(float)
     return np.fft.rfftfreq(len(values),1/rate)[np.argmax(abs(np.fft.rfft(values)))]
+
+
+def test_short_speaker_turn_proposes_a_source_preserving_split():
+    rows=[dict(id=1,text='我们出发。对！',zh='',speaker='speaker_1',start=0,end=3.5)]
+    turns=[dict(start=0,end=3,speaker='a'),dict(start=3,end=3.5,speaker='b')]
+    words=[dict(word='我们出发',start=0,end=3),dict(word='对',start=3,end=3.5)]
+    labels={'a':'role_a','b':'role_b'}
+    items=match_segments(rows,turns,turns,labels)
+    assert not items[0]['needs_review']
+    add_split_suggestions(rows,items,turns,words,labels)
+    assert items[0]['needs_review']
+    assert [(p['text'],p['speaker']) for p in items[0]['split_parts']]==[('我们出发。','role_a'),('对！','role_b')]
+
+
+def test_adopting_a_split_requires_explicit_approval_to_clear_translation(project):
+    _app,client,store,identifier,folder,*_=project
+    parent=dict(id=1,text='我们出发。对！',zh='Let’s go. Right!',speaker='speaker_1',start=0,end=3.5)
+    parts=[dict(text='我们出发。',speaker='speaker_1',start=0,end=3),dict(text='对！',speaker='second',start=3,end=3.5)]
+    state=store.update(identifier,segments=[parent])
+    store.update(identifier,diarization_proposal=dict(request_id='test',revision=state['edit_revision'],status='ready',
+        source=source_identity(folder),items=[dict(id=1,split_parts=parts)],roles={'second':dict(name='第二个角色')},references={}))
+    endpoint=f'/api/projects/{identifier}/diarization/apply'
+    body=dict(revision=state['edit_revision'],request_id='test',splits=[{'id':1}])
+    assert client.post(endpoint,json=body).status_code==400
+    assert store.read(identifier)['segments']==[parent]
+    body['splits'][0]['retranslate']=True
+    result=client.post(endpoint,json=body)
+    assert result.status_code==200,result.text
+    assert [(r['id'],r['speaker'],r['zh']) for r in result.json()['segments']]==[(1,'speaker_1',''),(2,'second','')]
 
 
 def test_proposal_keeps_old_outputs_and_samples_distinct_non_overlap_voices(project):

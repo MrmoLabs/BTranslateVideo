@@ -138,6 +138,78 @@ def match_segments(rows, exclusive, regular, label_map):
     return result
 
 
+def add_split_suggestions(rows, items, exclusive, words, label_map):
+    from .segmentation import lexical
+
+    turn_ends = [turn['end'] for turn in exclusive]
+    centers = [((word['start'] + word['end']) / 2) for word in words]
+    for index, (row, item) in enumerate(zip(rows, items)):
+        start, end = row['start'], row['end']
+        turns = []
+        for turn_index in range(bisect_right(turn_ends, start),len(exclusive)):
+            turn = exclusive[turn_index]
+            if turn['start'] >= end:
+                break
+            if min(turn['end'], end) - max(turn['start'], start) >= .12:
+                turns.append(turn)
+        changes = [round(b['start'], 3) for a, b in zip(turns, turns[1:]) if a['speaker'] != b['speaker']]
+        if not changes:
+            continue
+        item['split_times'] = changes
+        item['needs_review'] = True
+        reason = '一句包含多个说话人'
+        if reason not in item['reasons']:
+            item['reasons'].append(reason)
+        if item['overlap'] > 0:
+            continue
+
+        selected = [word for word in words[bisect_right(centers, start - 1e-6):bisect_right(centers, end)] if lexical(word['word'])]
+        if not selected or lexical(''.join(word['word'] for word in selected)) != lexical(row['text']):
+            continue
+        groups = []
+        for word in selected:
+            length = max(.001, word['end'] - word['start'])
+            matches = [turn for turn in turns if min(word['end'],turn['end']) - max(word['start'],turn['start']) >= .7 * length]
+            if len(matches) != 1:
+                break
+            speaker = label_map[matches[0]['speaker']]
+            if not groups or groups[-1]['speaker'] != speaker:
+                groups.append(dict(speaker=speaker, words=[]))
+            groups[-1]['words'].append(word)
+        else:
+            if len(groups) - 1 != len(changes):
+                continue
+            offsets = [position for position, character in enumerate(row['text']) for _ in lexical(character)]
+            boundaries = [0]
+            times = [start]
+            word_count = 0
+            for before, after in zip(groups,groups[1:]):
+                word_count += len(lexical(''.join(word['word'] for word in before['words'])))
+                boundaries.append(offsets[word_count])
+                times.append(round((before['words'][-1]['end'] + after['words'][0]['start']) / 2, 3))
+            boundaries.append(len(row['text']))
+            times.append(end)
+            if any(b-a < .02 for a,b in zip(times,times[1:])) or (index+1 < len(rows) and times[-2] > rows[index+1]['start']):
+                continue
+            item['split_parts'] = [dict(text=row['text'][boundaries[i]:boundaries[i+1]].strip(),
+                                        start=times[i],end=times[i+1],speaker=group['speaker'])
+                                   for i,group in enumerate(groups)]
+
+
+def cached_asr_words(folder, duration):
+    from .pipeline import file_hash
+    from .segmentation import flatten_words
+
+    try:
+        metadata = json.loads((folder/'cache/asr-words-metadata.json').read_text(encoding='utf-8'))
+        if metadata.get('source') == file_hash(folder/'source.media'):
+            raw = json.loads((folder/'cache/asr.json').read_text(encoding='utf-8'))
+            return sorted(flatten_words(raw,duration),key=lambda word:(word['start']+word['end'])/2)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return []
+
+
 def run_diarization(pipeline, identifier, settings, cancel):
     store = pipeline.store; project = store.read(identifier); folder = store.folder(identifier)
     request = project.get('diarization_request')
@@ -192,6 +264,7 @@ def run_diarization(pipeline, identifier, settings, cancel):
             name=role_name(project,speaker) if label in reused else unique_role_name(project,reserved=[r['name'] for r in roles.values()])
             roles[speaker]=dict(name=name,label=label,origin='diarization',reused=label in reused)
         items = match_segments(project['segments'], exclusive, regular, label_map)
+        add_split_suggestions(project['segments'], items, exclusive, cached_asr_words(folder,duration), label_map)
         references = {}; origins = {}
         reference_rows = [dict(id=i+1, **turn) for i,turn in enumerate(regular)]
         for index,label in enumerate(labels):

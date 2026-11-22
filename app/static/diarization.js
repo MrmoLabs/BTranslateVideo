@@ -1,5 +1,5 @@
 "use strict";
-const diarUI={project:null,version:null,key:null,choices:new Map(),page:0,ready:false,loading:false,submitting:false,applying:false};
+const diarUI={project:null,version:null,key:null,choices:new Map(),splits:new Map(),page:0,ready:false,loading:false,submitting:false,applying:false};
 const diarDialog=$('#diarization-dialog');
 function pauseDiarizationMedia(){for(const audio of $$('#diarization-dialog audio'))audio.pause();if(typeof stopSourceCue==='function')stopSourceCue();}
 async function loadDiarizationEnvironment(){
@@ -31,11 +31,12 @@ function renderDiarizationControls(){
   $('#start-diarization').disabled=locked||diarUI.loading||!diarUI.ready||!state.rows.length||!!state.projectUnavailable;
   $('#start-diarization').textContent=tr(busy&&state.project?.stage==='diarize'?'正在识别说话人…':'开始识别');
   $('#cancel-diarization').hidden=!(busy&&state.project?.stage==='diarize');
-  $('#apply-diarization').disabled=locked||!diarizationProposal()||!diarUI.choices.size||!!state.projectUnavailable||!!(diarizationProposal()&&(diarizationProposal().revision!==state.editorRevision||state.dirty));
-  $('#apply-diarization').textContent=tr('采用所选分配（{0} 句）',diarUI.choices.size);
+  const count=diarUI.choices.size+diarUI.splits.size;
+  $('#apply-diarization').disabled=locked||!diarizationProposal()||!count||!!state.projectUnavailable||!!(diarizationProposal()&&(diarizationProposal().revision!==state.editorRevision||state.dirty));
+  $('#apply-diarization').textContent=tr('采用所选分配（{0} 句）',count);
   for(const element of $$('#diarization-options input, #diarization-options select, #diarization-proposal input, #diarization-proposal select'))element.disabled=locked;
   const filtered=filteredDiarizationItems();
-  $('#diarization-batch-count').textContent=tr('筛选 {0} 句 · 已选 {1} 句（跨页）',filtered.length,diarUI.choices.size);
+  $('#diarization-batch-count').textContent=tr('筛选 {0} 句 · 已选 {1} 句（跨页）',filtered.length,count);
   for(const control of $$('.diarization-batch-tools button,.diarization-batch-tools select'))control.disabled=locked||!diarizationProposal();
   $('#diarization-assign-filtered').disabled=locked||!filtered.length||!$('#diarization-bulk-role').value;
   const mode=$('#diarization-count-mode').value;
@@ -52,6 +53,7 @@ function renderDiarization(){
       const options=diarizationChoices(proposal).map(id=>`<option value="${esc(id)}">${esc(diarizationRoleName(id,proposal))}</option>`).join('');
       $('#diarization-role-filter').innerHTML=`<option value="">${esc(tr('全部角色'))}</option>`+options;$('#diarization-bulk-role').innerHTML=options;
       $('#diarization-config').open=false;diarUI.key=key;diarUI.page=0;diarUI.choices=new Map(proposal.items.filter(item=>item.after&&!item.needs_review).map(item=>[item.id,item.after]));
+      diarUI.splits.clear();
       $('#diarization-roles').innerHTML=Object.entries(proposal.roles).map(([id,role])=>`<article class="diarization-role"><b>${esc(role.name)}</b><p class="subtle">${esc(tr(role.reused?'复用已有角色，保留名称与音色':'新识别角色；可在下方批量分配到已有角色'))}</p><p class="subtle">${esc(tr('匹配 {0} 句',proposal.items.filter(item=>item.after===id).length))}</p>${proposal.references[id]?`<audio controls preload="none" aria-label="${esc(tr('{0} 原片参考音',role.name))}" src="${fileUrl(proposal.references[id])}"></audio>`:`<p class="subtle">${esc(tr('清晰独白不足 3 秒，采用后请上传参考音'))}</p>`}</article>`).join('');
       renderDiarizationTable();
     }
@@ -76,7 +78,9 @@ function renderDiarizationTable(){
     const row=rows.get(item.id);if(!row)return '';
     const selected=diarUI.choices.get(item.id),suggested=selected||item.after;
     const options=diarizationChoices(proposal).map(key=>`<option value="${esc(key)}" ${key===suggested?'selected':''}>${esc(diarizationRoleName(key,proposal))}</option>`).join('');
-    return `<tr><td><input type="checkbox" data-diar-check="${item.id}" ${selected?'checked':''} aria-label="${esc(tr('采用第 {0} 句分配',item.id))}"></td><td><b>${esc(tr('第 {0} 句',item.id))}</b><small>${clock(row.start)}–${clock(row.end)}</small><button type="button" data-source-audio="${item.id}">${esc(tr('听原声'))}</button></td><td><p dir="auto">${esc(row.zh||row.text)}</p><small>${esc(tr('原角色：{0}',roleName(item.before)))}</small></td><td><select data-diar-role="${item.id}" aria-label="${esc(tr('第 {0} 句识别角色',item.id))}">${!suggested?`<option value="">${esc(tr('请选择角色'))}</option>`:''}${options}</select><small class="${item.needs_review?'diar-review':'subtle'}">${esc(item.needs_review?item.reasons.map(reason=>tr(reason)).join(' · '):tr('按人声时间匹配'))}</small></td></tr>`;
+    const inspect=item.split_times?.length?`<button type="button" data-diar-time="${item.id}">${esc(tr('核对换人位置 {0}',clock(item.split_times[0])))}</button>`:'';
+    const preview=item.split_parts?.length?`<details><summary>${esc(tr('建议按换人拆句'))}</summary>${item.split_parts.map((part,index)=>`<p dir="auto"><b>${esc(diarizationRoleName(part.speaker,proposal))}</b> ${esc(part.text)} <button type="button" data-diar-part="${item.id}" data-part-index="${index}">${esc(tr('听原声'))}</button></p>`).join('')}${inspect}<label><input type="checkbox" data-diar-split="${item.id}" ${diarUI.splits.has(item.id)?'checked':''}> ${esc(tr(row.zh.trim()?'采用拆句，清空本句旧译文':'采用拆句'))}</label></details>`:inspect;
+    return `<tr><td><input type="checkbox" data-diar-check="${item.id}" ${selected?'checked':''} aria-label="${esc(tr('采用第 {0} 句分配',item.id))}"></td><td><b>${esc(tr('第 {0} 句',item.id))}</b><small>${clock(row.start)}–${clock(row.end)}</small><button type="button" data-source-audio="${item.id}">${esc(tr('听原声'))}</button></td><td><p dir="auto">${esc(row.zh||row.text)}</p><small>${esc(tr('原角色：{0}',roleName(item.before)))}</small>${preview}</td><td><select data-diar-role="${item.id}" aria-label="${esc(tr('第 {0} 句识别角色',item.id))}">${!suggested?`<option value="">${esc(tr('请选择角色'))}</option>`:''}${options}</select><small class="${item.needs_review?'diar-review':'subtle'}">${esc(item.needs_review?item.reasons.map(reason=>tr(reason)).join(' · '):tr('按人声时间匹配'))}</small></td></tr>`;
   }).join('');
   $('#diarization-page').textContent=tr('{0} / {1} · {2} 句',diarUI.page+1,pages,items.length);
   $('#diarization-prev').disabled=diarUI.page===0;$('#diarization-next').disabled=diarUI.page===pages-1;
@@ -93,23 +97,31 @@ $('#diarization-only-review').onchange=()=>{diarUI.page=0;renderDiarizationTable
 $('#diarization-role-filter').onchange=()=>{diarUI.page=0;renderDiarizationTable();};
 $('#diarization-select-filtered').onclick=()=>{
   for(const item of filteredDiarizationItems()){
+    if(diarUI.splits.has(item.id))continue;
     const select=$(`[data-diar-role="${item.id}"]`),speaker=select?.value||diarUI.choices.get(item.id)||item.after;
     if(speaker)diarUI.choices.set(item.id,speaker);
   }
   renderDiarizationTable();
 };
-$('#diarization-clear-filtered').onclick=()=>{for(const item of filteredDiarizationItems())diarUI.choices.delete(item.id);renderDiarizationTable();};
+$('#diarization-clear-filtered').onclick=()=>{for(const item of filteredDiarizationItems()){diarUI.choices.delete(item.id);diarUI.splits.delete(item.id);}renderDiarizationTable();};
 $('#diarization-assign-filtered').onclick=()=>{
   const speaker=$('#diarization-bulk-role').value;if(!speaker)return;
-  const items=filteredDiarizationItems();for(const item of items)diarUI.choices.set(item.id,speaker);
+  const items=filteredDiarizationItems();for(const item of items){diarUI.splits.delete(item.id);diarUI.choices.set(item.id,speaker);}
   renderDiarizationTable();toast(tr('已调整筛选内 {0} 句候选分配，点击采用后才会保存。',items.length));
 };
 $('#diarization-prev').onclick=()=>{diarUI.page--;renderDiarizationTable();};$('#diarization-next').onclick=()=>{diarUI.page++;renderDiarizationTable();};
 $('#diarization-rows').addEventListener('change',event=>{
   const checkbox=event.target.closest('[data-diar-check]'),select=event.target.closest('[data-diar-role]');
-  if(checkbox){const id=Number(checkbox.dataset.diarCheck),speaker=$(`[data-diar-role="${id}"]`).value;if(checkbox.checked&&speaker)diarUI.choices.set(id,speaker);else {diarUI.choices.delete(id);checkbox.checked=false;}}
+  const split=event.target.closest('[data-diar-split]');
+  if(split){const id=Number(split.dataset.diarSplit);if(split.checked){diarUI.choices.delete(id);diarUI.splits.set(id,{id,retranslate:!!state.rows.find(row=>row.id===id)?.zh.trim()});const assign=$(`[data-diar-check="${id}"]`);if(assign)assign.checked=false;}else diarUI.splits.delete(id);}
+  if(checkbox){const id=Number(checkbox.dataset.diarCheck),speaker=$(`[data-diar-role="${id}"]`).value;if(checkbox.checked&&speaker){diarUI.choices.set(id,speaker);diarUI.splits.delete(id);const splitBox=$(`[data-diar-split="${id}"]`);if(splitBox)splitBox.checked=false;}else {diarUI.choices.delete(id);checkbox.checked=false;}}
   if(select){const id=Number(select.dataset.diarRole);if(diarUI.choices.has(id))diarUI.choices.set(id,select.value);}
   renderDiarizationControls();
+});
+$('#diarization-rows').addEventListener('click',event=>{
+  const part=event.target.closest('[data-diar-part]'),time=event.target.closest('[data-diar-time]');
+  if(part){const id=Number(part.dataset.diarPart),preview=diarizationProposal()?.items.find(item=>item.id===id)?.split_parts?.[Number(part.dataset.partIndex)];if(preview)guard(()=>playSourceCue({id,...preview}));}
+  if(time){const id=Number(time.dataset.diarTime),cut=diarizationProposal()?.items.find(item=>item.id===id)?.split_times?.[0];const index=state.rows.findIndex(row=>row.id===id);if(index>=0&&cut!==undefined){diarDialog.close();switchTab('subtitles');guard(()=>window.SubtitleTools.open(index,cut));}}
 });
 $('#start-diarization').onclick=()=>guard(async()=>{
   if(diarUI.submitting)return;diarUI.submitting=true;$('#diarization-error').textContent='';renderDiarizationControls();
@@ -130,7 +142,7 @@ $('#apply-diarization').onclick=()=>guard(async()=>{
   diarUI.applying=true;$('#diarization-error').textContent='';renderDiarizationControls();pauseDiarizationMedia();
   try{
     const {id,version}=await saveProjectDraftsForAction();
-    await api(`/api/projects/${id}/diarization/apply`,json('POST',{revision:state.editorRevision,request_id:proposal.request_id,assignments:[...diarUI.choices].map(([id,speaker])=>({id,speaker}))}));
+    await api(`/api/projects/${id}/diarization/apply`,json('POST',{revision:state.editorRevision,request_id:proposal.request_id,assignments:[...diarUI.choices].map(([id,speaker])=>({id,speaker})),splits:[...diarUI.splits.values()]}));
     if(id!==state.id||version!==state.selectionVersion)return;
     state.voiceKey=null;state.boardKey=null;state.subtitleKey=null;state.outputRenderKey=null;
     await refreshCurrent(true);diarDialog.close();$('#voice-references').open=true;toast(tr('说话人分配已采用，请试听各角色参考音并核对重叠对白。'));
