@@ -39,7 +39,8 @@ def summary(project):
 
 def effective_asr(settings, project):
     overrides = {key: value for key, value in project.get('asr_options', {}).items() if key in ASR_FIELDS}
-    return Settings.model_validate({**settings.model_dump(), **overrides})
+    return Settings.model_validate({**settings.model_dump(), **overrides,
+                                    'translation_api_key': settings.translation_api_key})
 
 
 def validate_language(settings, language):

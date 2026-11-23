@@ -7,6 +7,7 @@ function renderWorkflow(){
   const rows=state.rows||p.segments,translated=rows.filter(r=>r.zh?.trim()).length;
   const missing=rows.length-translated,unassigned=rows.filter(r=>r.speaker===UNASSIGNED_SPEAKER).length;
   const ready=rows.length>0&&!missing,busy=active(p)||state.saving||!!state.projectUnavailable;
+  const canResume=ProjectWorkflow.canResumeSegmentation(p);
   const status={source:rows.length?tr('{0} 句原文',rows.length):tr('等待识别'),subtitles:rows.length?tr('{0}/{1} 句译文',translated,rows.length):tr('等待原文'),voices:unassigned?tr('{0} 句未分配角色',unassigned):p.outputs.audio?tr('已生成整片配音'):tr('先试听一句'),export:p.outputs.preview?tr('可以观看'):tr('等待生成成片')};
   Object.entries(status).forEach(([key,value])=>$('#step-'+key+'-state').textContent=value);
   $$('.tab').forEach(e=>e.classList.toggle('complete',({source:!!rows.length,subtitles:ready,voices:!!p.outputs.audio,export:!!p.outputs.preview})[e.dataset.tab]));
@@ -19,7 +20,8 @@ function renderWorkflow(){
   $('#workflow-need-audio').hidden=!!p.outputs.audio&&!state.dirty;
   $('#run-dub').disabled=busy||!ready||!!unassigned||!!state.targetSelectionDirty;
   $('#run-translate').disabled=busy||!missing||!rows.length;
-  $('#run-analyze').hidden=!!rows.length;
+  $('#run-retranslate_all').disabled=busy||!translated;
+  $('#run-analyze').hidden=!!rows.length||canResume;
   $('#source-state-title').textContent=rows.length?tr('原文字幕已准备'):tr('先生成原文字幕');
   $('#source-actions-note').textContent=rows.length?tr('可进入下一步翻译校对；需要重建时间轴时使用重新断句，或导入替换字幕。'):tr('识别讲话内容，再按完整句意分段。已有字幕可以直接导入。');
   $('#panel-source .source-reprocess').hidden=!rows.length;
@@ -31,14 +33,14 @@ function renderWorkflow(){
   $('#export-translation-srt').disabled=!translated||!!state.projectUnavailable;
   $('#subtitle-export-note').textContent=tr('导出全部句子的当前编辑稿，含未保存修改；未采用候选不导出。')+(missing?' '+tr('空白译文将跳过（{0} 句）。',missing):'');
   const voicesReady=projectSpeakers().every(s=>!!p.references?.[s])||state.modelBackendSettings?.tts_provider==='openai_speech';
-  const next=ProjectWorkflow.nextAction(p,rows,state.tab,voicesReady&&!unassigned);
+  const next=canResume?{stage:'resegment',label:'继续断句'}:ProjectWorkflow.nextAction(p,rows,state.tab,voicesReady&&!unassigned);
   const button=$('#next-action');
   button.hidden=!next&&!state.dirty&&!state.audioDirty;
   button.textContent=state.dirty||state.audioDirty?tr('保存全部草稿'):next?tr(next.label,next.count??''):'';
   button.disabled=busy;button.setAttribute('aria-busy',String(state.saving));
   button.onclick=()=>guard(async()=>{
     if(state.dirty||state.audioDirty){await projectActions.prepare({audio:true});renderWorkflow();toast(tr('全部草稿已保存'));}
-    else if(next){if(next.tab)switchTab(next.tab);else if(next.download)downloadSubtitleDraft(next.download);else if(next.stage)await run(next.stage);}
+    else if(next){if(next.tab)switchTab(next.tab);else if(next.download)downloadSubtitleDraft(next.download);else if(canResume)await runResegment();else if(next.stage)await run(next.stage);}
   });
   // Expand incomplete role setup once on entry, then respect the user's choice.
   if(state.workflowRoleProject!==p.id){state.workflowRoleProject=p.id;$('#voice-references').open=projectSpeakers().some(s=>!p.references?.[s])||!projectSpeakers().length;}

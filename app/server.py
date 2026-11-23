@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -90,6 +92,7 @@ class ProposalApply(BaseModel):
     proposal_id: str
     revision: int
     ids: list[int] = Field(min_length=1, max_length=30000)
+    edits: dict[int, str] = Field(default_factory=dict, max_length=30000)
 
 class AuditionPayload(BaseModel):
     segment: dict
@@ -159,6 +162,14 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     async def validation_error(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(request, exc):
+        if request.url.path in {"/api/settings", "/api/model-backends/check"}:
+            return JSONResponse({"detail": [
+                {"loc": error["loc"], "msg": error["msg"], "type": error["type"]} for error in exc.errors()
+            ]}, status_code=422)
+        return await request_validation_exception_handler(request, exc)
+
     @app.exception_handler(ProjectUnavailable)
     async def unavailable_project(request, exc):
         return JSONResponse({
@@ -186,28 +197,50 @@ def create_app(data_root: Path | None = None) -> FastAPI:
 
     settings_lock=threading.RLock()
 
+    def settings_view(settings):
+        return {**settings.model_dump(), "translation_api_key_configured": bool(settings.translation_api_key)}
+
+    def save_settings(settings):
+        values = settings.model_dump()
+        if settings.translation_api_key:
+            values["translation_api_key"] = settings.translation_api_key.get_secret_value()
+        atomic_json(SETTINGS, values)
+
+    def keep_translation_key(settings, previous):
+        if ("translation_api_key" not in settings.model_fields_set
+                and settings.translation_api_url == previous.translation_api_url):
+            return settings.model_copy(update={"translation_api_key": previous.translation_api_key})
+        return settings
+
     @app.get("/api/settings")
     def settings_get():
-        return load_settings().model_dump()
+        return settings_view(load_settings())
 
     @app.put("/api/settings")
     def settings_put(settings: Settings):
         with settings_lock:
             previous=load_settings()
+            settings=keep_translation_key(settings, previous)
             changed=(previous.tts_keep_loaded,previous.tts_idle_minutes)!=(settings.tts_keep_loaded,settings.tts_idle_minutes)
-            atomic_json(SETTINGS, settings.model_dump())
+            save_settings(settings)
         if changed:pipeline.tts.configure_retention(None if settings.tts_keep_loaded else settings.tts_idle_minutes*60)
-        return settings.model_dump()
+        return settings_view(settings)
 
     @app.get('/api/model-backends')
     def model_backends():
         from .model_backends import catalog
         return catalog()
 
+    @app.get('/api/model-backends/local-translation')
+    def local_translation_model_list():
+        from .model_backends import local_translation_models
+        return local_translation_models(ROOT / 'models')
+
     @app.post('/api/model-backends/check')
     def model_backend_check(payload: BackendCheck):
         from .model_backends import check_backend
-        return check_backend(payload.stage, payload.settings)
+        settings=keep_translation_key(payload.settings, load_settings()) if payload.stage == 'translation' else payload.settings
+        return check_backend(payload.stage, settings)
 
     @app.post("/api/shutdown")
     def shutdown():
@@ -239,10 +272,10 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     @app.put('/api/tts-session/retention')
     def tts_retention(payload: TTSRetention):
         with settings_lock:
-            settings=Settings(**{**load_settings().model_dump(),**payload.model_dump()})
-            atomic_json(SETTINGS,settings.model_dump())
+            settings=load_settings().model_copy(update=payload.model_dump())
+            save_settings(settings)
         applied=pipeline.tts.configure_retention(None if settings.tts_keep_loaded else settings.tts_idle_minutes*60)
-        return dict(settings=settings.model_dump(),applied=applied,session=tts_session())
+        return dict(settings=settings_view(settings),applied=applied,session=tts_session())
 
     @app.get('/api/tts-session/logs')
     def tts_control_logs():
@@ -489,11 +522,15 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             data = store.read(identifier)
             _,digest=store.state_files.read(store.folder(identifier)/'project.json')
         from .translation_checks import project_language_checks
-        from .segmentation import boundary_checks
+        from .segmentation import audit_boundary_checks, boundary_checks
         from .human_review import normalized
         data['segments'] = normalized(data['segments'])
         data['translation_checks']=project_language_checks(data)
-        data['boundary_checks']=boundary_checks(data['segments'])
+        if data.get('segmentation_version') and (data.get('media') or {}).get('duration') is not None:
+            data['boundary_checks']=audit_boundary_checks(data['segments'],store.folder(identifier)/'cache'/'asr.json',
+                                                          data['media']['duration'])
+        else:
+            data['boundary_checks']=boundary_checks(data['segments'])
         data['content_version']=digest
         data['process_log']=project_log(identifier)
         from .project_experience import enrich
@@ -686,6 +723,12 @@ def create_app(data_root: Path | None = None) -> FastAPI:
                           for prior, item in zip(previous['segments'], segments)]
                 return store.update(identifier, segments=marked)
             archive_current(store, identifier)
+            pending=previous.get('translation_proposal') or {}
+            if pending.get('kind')=='retranslate_all' and pending.get('status')=='ready':
+                try:
+                    read_proposal(store,identifier)
+                except (OSError,ValueError,KeyError):
+                    pass
             atomic_json(store.folder(identifier) / "segments.previous.json", previous["segments"])
             result = store.update(identifier, segments=segments, dub_signature="", outputs={}, error="", status="idle")
             pipeline.write_subtitles(identifier)
@@ -693,14 +736,20 @@ def create_app(data_root: Path | None = None) -> FastAPI:
 
     @app.get("/api/projects/{identifier}/translation-proposal")
     def translation_proposal(identifier: str):
-        return read_proposal(store, identifier)
+        return read_proposal(store, identifier, include_partial=True)
+
+    @app.get("/api/projects/{identifier}/translation-requests")
+    def translation_requests(identifier: str, run: str, request_id: str | None = None):
+        store.read_runtime(identifier)
+        return JSONResponse(pipeline.translation_requests.snapshot(identifier, run, request_id),
+                            headers={"Cache-Control": "no-store"})
 
     @app.post("/api/projects/{identifier}/translation-proposal/apply")
     def apply_translation_proposal(identifier: str, data: ProposalApply):
         with pipeline.lock:
             editable(identifier)
             try:
-                segments = selected_changes(store, identifier, data.proposal_id, data.revision, data.ids)
+                segments = selected_changes(store, identifier, data.proposal_id, data.revision, data.ids, data.edits)
             except ValueError as error:
                 raise HTTPException(409, str(error))
             project = store.read(identifier)
@@ -712,7 +761,8 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             for row in segments:
                 if row['id'] not in data.ids:continue
                 checks.pop(str(row['id']),None)
-                issues=proposal_items[row['id']].get('checks',[])
+                item=proposal_items[row['id']]
+                issues=item.get('checks',[]) if row['zh']==item['after'] else []
                 if issues:checks[str(row['id'])]=dict(source=row['text'],translation=row['zh'],target_language=target_code(project),issues=issues)
             result = store.update(identifier, segments=segments, translation_proposal=metadata, translation_checks=checks, outputs={}, dub_signature="", status="idle", error="")
             pipeline.write_subtitles(identifier)

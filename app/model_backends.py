@@ -9,10 +9,12 @@ import base64
 import json
 import math
 import os
+import re
 import sys
 import wave
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -40,6 +42,7 @@ BACKENDS = {
     'translation': [Backend('auto', '自动兼容旧配置', local_process=True),
                     Backend('llama_cpp', 'llama.cpp 本地 GGUF', local_process=True),
                     Backend('openai', '本地兼容对话接口'),
+                    Backend('openai_remote', '网络翻译 API（OpenAI 兼容）'),
                     Backend('bilibili', 'B 站官方翻译 API')],
     'tts': [Backend('indextts', 'IndexTTS', local_process=True, reference_audio=True, emotions=True),
             Backend('openai_speech', '本地兼容语音接口'),
@@ -51,8 +54,47 @@ def catalog():
     return {stage: [asdict(backend) for backend in backends] for stage, backends in BACKENDS.items()}
 
 
+def local_translation_models(directory):
+    directory = directory.resolve()
+    models = []
+    for path in directory.rglob('*.[gG][gG][uU][fF]'):
+        if not path.is_file() or not path.resolve().is_relative_to(directory):
+            continue
+        shard = re.search(r'-(\d{5})-of-\d{5}\.gguf$', path.name, re.IGNORECASE)
+        if shard and shard[1] != '00001':
+            continue
+        models.append('models/' + path.relative_to(directory).as_posix())
+    return sorted(models, key=str.casefold)
+
+
 def uses_translation_service(settings):
-    return settings.translation_provider in {'openai', 'bilibili'} or (settings.translation_provider == 'auto' and bool(settings.translation_url))
+    return settings.translation_provider in {'openai', 'openai_remote', 'bilibili'} or (settings.translation_provider == 'auto' and bool(settings.translation_url))
+
+
+def translation_parallelism(settings):
+    return 1 if uses_translation_service(settings) and settings.translation_provider != 'openai_remote' else settings.translation_parallel
+
+
+def translation_output_budget(settings, default, rows):
+    if settings.translation_provider != 'openai_remote' or len(rows) <= 8:
+        return default
+    length = sum(len(row["text"]) for row in rows)
+    return min(8192, max(default, length + 64 * len(rows)))
+
+
+class TranslationCapacityError(ValueError):
+    """The request exceeded the translation endpoint's input or output capacity."""
+
+
+def translation_input_too_large(response):
+    if response.status_code == 413:
+        return True
+    if response.status_code not in (400, 422):
+        return False
+    try:
+        return response.json()['error']['code'] == 'context_length_exceeded'
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 def chat_payload(settings, payload):
@@ -60,8 +102,14 @@ def chat_payload(settings, payload):
     payload = dict(payload)
     if uses_translation_service(settings) and settings.translation_provider != 'bilibili':
         payload.pop('chat_template_kwargs', None)
+    if (settings.translation_provider == 'openai_remote'
+            and urlsplit(settings.translation_service_url).hostname == 'api.siliconflow.cn'
+            and settings.translation_model_id in {'deepseek-ai/DeepSeek-V3.2', 'Pro/deepseek-ai/DeepSeek-V3.2'}):
+        payload['enable_thinking'] = False
     if not settings.translation_json_mode:
         payload.pop('response_format', None)
+    elif settings.translation_provider == 'openai_remote' and 'response_format' in payload:
+        payload['response_format'] = {'type': 'json_object'}
     return payload
 
 
@@ -77,6 +125,8 @@ def validate_tts(settings, project, rows=()):
         tts_language(project, settings.index_version)
     elif code not in settings.tts_languages.split(','):
         raise ValueError('当前配音接口未配置这个目标语言，请检查设置中的支持语言')
+    if settings.tts_provider != 'indextts' and any(row.get('emotion') == 'source' for row in rows):
+        raise ValueError('跟随本句原声需要本地 IndexTTS，请切换模型或修改情绪设置')
     if not tts_backend(settings).emotions and any(emotion_fields(row) for row in rows):
         raise ValueError('普通语音接口不支持参考音或情绪；请将情绪设为沿用，或切换 IndexTTS / 参考音桥接接口')
     return code.upper()
@@ -232,6 +282,25 @@ def synthesize_service(settings,clips,total,folder,cancel,progress):
 def check_backend(stage,settings):
     if stage not in BACKENDS:raise ValueError('无效模型阶段')
     provider=getattr(settings,stage+'_provider')
+    if stage == 'translation' and provider == 'openai_remote':
+        from threading import Event
+        from .translation import _post_cancellable, parse_translation, translation_http_options
+
+        prompt = 'Translate “Hello, world.” into Simplified Chinese. Return a JSON object only: {"translations":[{"id":1,"translation":"..."}]}.'
+        payload = chat_payload(settings, dict(model=settings.translation_model_id,
+            messages=[dict(role='user', content=prompt)], stream=False, response_format={'type': 'json_object'}))
+        options = {**translation_http_options(settings), 'read_timeout': min(25, settings.model_service_timeout)}
+        try:
+            response = asyncio.run(_post_cancellable(settings.translation_service_url + '/chat/completions',
+                payload, Event(), **options))
+            if not response.is_success:
+                return dict(ok=False, level='connection', message=f'网络翻译 API 请求失败（HTTP {response.status_code}）')
+            parse_translation(response.json()['choices'][0]['message']['content'], [1])
+        except httpx.RequestError:
+            return dict(ok=False, level='connection', message='无法连接网络翻译 API，请检查地址和网络')
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            return dict(ok=False, level='inference', message='网络翻译 API 已响应，但测试译文未通过字幕格式检查')
+        return dict(ok=True, level='inference', message='网络翻译 API 测试通过')
     if stage == 'translation' and provider == 'bilibili':
         from threading import Event
         from .translation import _post_cancellable, parse_translation

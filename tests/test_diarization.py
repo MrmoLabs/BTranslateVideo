@@ -15,6 +15,24 @@ from app.media import Cancelled, check_cancel
 from app.server import create_app
 
 
+def test_transcribed_short_interjection_is_preserved_as_a_split():
+    rows = [dict(id=1, start=0, end=3, text='走吧。嗯！继续。', speaker='old')]
+    turns = [dict(start=0, end=1.0, speaker='a'),
+             dict(start=1.0, end=1.1, speaker='b'),
+             dict(start=1.1, end=3.0, speaker='a')]
+    words = [dict(start=.4, end=.9, word='走吧'), dict(start=1.01, end=1.09, word='嗯'),
+             dict(start=1.2, end=1.8, word='继续')]
+    labels = {'a': 'main', 'b': 'guest'}
+    items = match_segments(rows, turns, turns, labels)
+    add_split_suggestions(rows, items, turns, words, labels)
+    assert items[0]['needs_review']
+    assert [(part['speaker'], part['text']) for part in items[0]['split_parts']] == [
+        ('main', '走吧。'), ('guest', '嗯！'), ('main', '继续。')]
+    unverified = match_segments(rows, turns, turns, labels)
+    add_split_suggestions(rows, unverified, turns, words[::2], labels)
+    assert 'split_parts' not in unverified[0]
+
+
 def row(identifier,start,end):
     return dict(id=identifier,start=start,end=end,text=f'Source {identifier}',zh=f'原译文 {identifier}',speaker='speaker_1')
 

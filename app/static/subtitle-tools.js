@@ -29,7 +29,16 @@ window.SubtitleTools=(()=>{
       const boundary=boundaryIssues(row);
       let notice=element.querySelector('.review-boundary-note');
       if(boundary.length&&!notice){notice=document.createElement('small');notice.className='review-boundary-note';element.querySelector('.review-cue').append(notice);}
-      if(notice){notice.hidden=!boundary.length;notice.textContent=boundary.map(issue=>issue.code==='condition_cut'?tr('条件句可能接到第 {0} 句',issue.next_id):tr('本句可能跨越两个主题')).join(' · ');}
+      if(notice){
+        notice.hidden=!boundary.length;
+        notice.textContent=boundary.map(issue=>{
+          if(issue.code==='condition_cut')return tr('条件句可能接到第 {0} 句',issue.next_id);
+          if(issue.code==='english_continuation')return tr('英语句意可能接到第 {0} 句',issue.next_id);
+          if(issue.code==='asr_sentence_split')return tr('原声识别在第 {0} 句仍连续，请核对边界。',issue.next_id);
+          if(issue.code==='asr_terminal_punctuation')return tr('原声识别的句末标点为 {0}，请核对。',issue.punctuation);
+          return tr('本句可能跨越两个主题');
+        }).join(' · ');
+      }
       const more=element.querySelector('.cue-more>div');
       if(!more.querySelector('[data-subtitle-tools]'))more.insertAdjacentHTML('afterbegin',`<button type="button" data-subtitle-tools="${index}">${esc(tr('时间轴与拆合句'))}</button><label class="human-mark-label">${esc(tr('人工标记'))}<select data-human-mark="${row.id}" aria-label="${esc(tr('第 {0} 句人工标记',row.id))}">${Object.entries(names).map(([value,name])=>`<option value="${value}">${esc(tr(name))}</option>`).join('')}</select></label>`);
       const select=more.querySelector('[data-human-mark]');select.value=row.review_status||'unreviewed';select.disabled=busy();more.querySelector('[data-subtitle-tools]').disabled=busy();

@@ -152,6 +152,8 @@ class BookStore:
                 sid=identifier(row['id']);value=row['text'].strip();voice=row.get('voice_id','')
                 if sid in seen or not value or len(value)>1500:raise ValueError('句子编号重复、内容为空或超过 1500 字')
                 if voice:identifier(voice)
+                if row.get('emotion') == 'source':
+                    raise ValueError('有声书没有本句原声，请选择角色参考音或其他情绪')
                 seen.add(sid);clean.append(dict(id=sid,text=value,voice_id=voice,paragraph=max(0,int(row.get('paragraph',0))),**emotion_fields(row)))
             default=payload.get('voice_id','')
             if default:identifier(default)

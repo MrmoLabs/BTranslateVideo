@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {coordinator,stages,mergeRuntime,acceptsProject}=require('../app/static/workflow-core.js');
+const {coordinator,stages,mergeRuntime,acceptsProject,canResumeSegmentation}=require('../app/static/workflow-core.js');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 (async()=>{
   const state={id:'a',selectionVersion:1,dirty:true,audioDirty:false};
@@ -27,5 +27,10 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
   assert.equal(acceptsProject({id:'a'},{id:'a',edit_revision:2},3),false);
   assert.equal(acceptsProject({id:'a',metadata_revision:4},{id:'a',metadata_revision:3,edit_revision:3},3),false);
   assert.equal(acceptsProject({id:'a'},{id:'a',edit_revision:3},3),true);
+  const stopped={status:'failed',processing:{step:'analyze',phase:'segmentation'}};
+  assert.equal(canResumeSegmentation(stopped),true);
+  assert.equal(canResumeSegmentation({...stopped,status:'running'}),false);
+  assert.equal(canResumeSegmentation({...stopped,processing:{step:'analyze',phase:'asr_decode'}}),false);
+  assert.equal(canResumeSegmentation({status:'cancelled',processing:{step:'retranscribe',phase:'segmentation_model'}}),true);
   console.log('Workflow dispatch: draft races, selection changes and duplicate clicks OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

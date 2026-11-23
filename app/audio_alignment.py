@@ -81,27 +81,35 @@ def edge_clip(source,folder,cancel):
 
 def conflict_report(rows,durations,video_duration,settings):
     """All proven earliest-start deadline violations, plus immediate neighbours."""
-    problems={};previous=0
+    records = []
+    affected = {}
+    previous = 0
     overlap=any(a['end']>b['start']+.00001 for a,b in zip(rows,rows[1:]))
     for index,(row,duration) in enumerate(zip(rows,durations)):
-        if duration<=0:continue
+        if duration <= 0:
+            records.append(None)
+            continue
         normal_end=max(row['end'],rows[index+1]['start'] if index+1<len(rows) else video_duration)
         earliest=max(0,row['start']-settings.max_lead)
-        minimum=duration/settings.max_speed+min(.12,.04+duration*.002)
+        reserve = 0 if overlap else min(.12, .04 + duration * .002)
+        minimum = duration / settings.max_speed + reserve
         start=max(previous,earliest) if not overlap else row['start']
         end_limit=min(video_duration,normal_end+settings.max_lag)
         if overlap:end_limit=min(video_duration,normal_end)
         late=max(0,start-(row['start']+settings.max_lag))
         short=max(0,start+minimum-end_limit)
+        capacity = max(0, (end_limit - start - reserve) * settings.max_speed)
+        records.append(dict(id=row['id'], voice_seconds=round(duration, 3),
+                            window_seconds=round(row['end'] - row['start'], 3),
+                            required_speed=round(duration / max(.001, row['end'] - row['start']), 3),
+                            max_voice_seconds=math.floor(capacity * 1000) / 1000))
         if late>.00001 or short>.00001:
             for neighbour in range(max(0,index-1),min(len(rows),index+2)):
-                item=rows[neighbour]
-                if durations[neighbour]<=0:continue
-                problems[item['id']]=dict(id=item['id'],voice_seconds=round(durations[neighbour],3),window_seconds=round(item['end']-item['start'],3),
-                    required_speed=round(durations[neighbour]/max(.001,item['end']-item['start']),3),
-                    pressure_seconds=round(max(late,short),3),reason='sequence_pressure' if neighbour==index else 'neighbour')
+                if neighbour == index or neighbour not in affected:
+                    affected[neighbour] = (round(max(late, short), 3), 'sequence_pressure' if neighbour == index else 'neighbour')
         previous=start+minimum
-    return list(problems.values())
+    return [{**record, 'pressure_seconds': affected[index][0], 'reason': affected[index][1]}
+            for index, record in enumerate(records) if record is not None and index in affected]
 
 
 def prepare_alignment(rows,clips,video_duration,settings,folder,cancel,progress):

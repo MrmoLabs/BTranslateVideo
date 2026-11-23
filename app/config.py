@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from .file_io import atomic_json
 
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "projects"
@@ -27,7 +27,8 @@ class Settings(BaseModel):
     asr_name: str = 'whisper-1'
     asr_revision: str = ''
     translation_revision: str = ''
-    translation_provider: Literal['auto', 'llama_cpp', 'openai', 'bilibili'] = 'auto'
+    translation_provider: Literal['auto', 'llama_cpp', 'openai', 'openai_remote', 'bilibili'] = 'auto'
+    segmentation_provider: Literal['translation', 'llama_cpp'] = 'translation'
     translation_json_mode: bool = True
     tts_provider: Literal['indextts', 'openai_speech', 'btv_reference'] = 'indextts'
     tts_url: str = ''
@@ -41,6 +42,9 @@ class Settings(BaseModel):
     asr_compute_type: str = "float16"
     translation_model: str = "models/Qwen3-8B-Q4_K_M.gguf"
     translation_url: str = ""
+    translation_api_url: str = ""
+    translation_api_key: SecretStr = Field(default=SecretStr(""), exclude=True)
+    translation_api_stream: bool = True
     translation_name: str = "local-translator"
     llama_executable: str = ""
     index_root: str = "vendor/index-tts"
@@ -66,17 +70,30 @@ class Settings(BaseModel):
     preview_encoder: str = "auto"
 
     translation_batch: int = Field(default=6, ge=1, le=12)
+    translation_remote_batch: int = Field(default=20, ge=1)
+    translation_layout: Literal['subtitle', 'paragraph'] = 'subtitle'
+    translation_parallel: Literal[1, 2] = 1
     translation_review: str = "auto"
     translation_compact: bool = True
+    translation_system_prompt: str = Field(default="", max_length=20000)
     glossary: str = Field(default="", max_length=20000)
 
     @property
     def translation_service_url(self) -> str:
-        return BILIBILI_TRANSLATION_URL if self.translation_provider == 'bilibili' else self.translation_url
+        if self.translation_provider == 'bilibili':
+            return BILIBILI_TRANSLATION_URL
+        if self.translation_provider == 'openai_remote':
+            return self.translation_api_url
+        return self.translation_url
 
     @property
     def translation_model_id(self) -> str:
         return BILIBILI_TRANSLATION_MODEL if self.translation_provider == 'bilibili' else self.translation_name
+
+    @field_validator("translation_system_prompt", mode="before")
+    @classmethod
+    def trim_translation_prompt(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("translation_review")
     @classmethod
@@ -104,6 +121,29 @@ class Settings(BaseModel):
                 raise ValueError("本机服务地址不能包含认证信息、查询参数或片段")
         return value.rstrip("/")
 
+    @field_validator("translation_api_url")
+    @classmethod
+    def secure_translation_url(cls, value):
+        value = value.strip().rstrip("/")
+        if not value:
+            return value
+        parsed = urlsplit(value)
+        if (parsed.scheme != 'https' or not parsed.hostname or '@' in parsed.netloc
+                or '?' in value or '#' in value or any(c.isspace() or ord(c) < 32 for c in value)
+                or '\\' in value):
+            raise ValueError('网络翻译接口需要 HTTPS 地址，地址中不能包含认证信息、查询参数或片段')
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError('网络翻译接口端口需要在 1～65535 之间')
+        return value.removesuffix('/chat/completions')
+
+    @field_validator("translation_api_key")
+    @classmethod
+    def clean_translation_key(cls, value):
+        key = value.get_secret_value().strip()
+        if len(key) > 4096 or any(not 33 <= ord(char) <= 126 for char in key):
+            raise ValueError('API 密钥格式无效')
+        return SecretStr(key)
+
     @field_validator('asr_name', 'translation_name', 'tts_name', 'tts_voice', 'tts_revision', 'asr_revision', 'translation_revision')
     @classmethod
     def bounded_model_text(cls, value):
@@ -126,6 +166,8 @@ class Settings(BaseModel):
             raise ValueError('本地识别接口需要服务地址和模型名称')
         if self.translation_provider == 'openai' and (not self.translation_url or not self.translation_name):
             raise ValueError('本地翻译接口需要服务地址和模型名称')
+        if self.translation_provider == 'openai_remote' and (not self.translation_api_url or not self.translation_name):
+            raise ValueError('网络翻译接口需要 HTTPS 地址和模型 ID')
         if self.tts_provider != 'indextts' and (not self.tts_url or not self.tts_name):
             raise ValueError('本地配音接口需要服务地址和模型名称')
         if self.tts_provider == 'openai_speech' and not self.tts_voice:
@@ -192,7 +234,7 @@ def diagnostics(settings: Settings) -> dict:
         "ffmpeg": tool(settings.ffmpeg),
         "ffprobe": tool(settings.ffprobe),
         "llama": str(llama) if llama else None,
-        "local_only": settings.translation_provider != 'bilibili',
+        "local_only": settings.translation_provider not in {'bilibili', 'openai_remote'},
         "separation_ready": separation_python().is_file() and all((resolve(settings.separation_model) / name).is_file() for name in ["config.json", "htdemucs.safetensors", "manifest.json"]),
     }
 

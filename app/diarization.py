@@ -145,12 +145,22 @@ def add_split_suggestions(rows, items, exclusive, words, label_map):
     centers = [((word['start'] + word['end']) / 2) for word in words]
     for index, (row, item) in enumerate(zip(rows, items)):
         start, end = row['start'], row['end']
+        selected = [word for word in words[bisect_right(centers, start - 1e-6):bisect_right(centers, end)] if lexical(word['word'])]
+        verified = bool(selected) and lexical(''.join(word['word'] for word in selected)) == lexical(row['text'])
         turns = []
         for turn_index in range(bisect_right(turn_ends, start),len(exclusive)):
             turn = exclusive[turn_index]
             if turn['start'] >= end:
                 break
-            if min(turn['end'], end) - max(turn['start'], start) >= .12:
+            left, right = max(start, turn['start']), min(end, turn['end'])
+            length = right - left
+            # Recover a brief interjection only when a word from this cue
+            # independently supports the turn.
+            backed_by_word = verified and .04 <= length < .12 and any(
+                left <= (word['start'] + word['end']) / 2 < right
+                and min(word['end'], right) - max(word['start'], left) >= .7 * max(.001, word['end'] - word['start'])
+                for word in selected)
+            if length >= .12 or backed_by_word:
                 turns.append(turn)
         changes = [round(b['start'], 3) for a, b in zip(turns, turns[1:]) if a['speaker'] != b['speaker']]
         if not changes:
@@ -163,8 +173,7 @@ def add_split_suggestions(rows, items, exclusive, words, label_map):
         if item['overlap'] > 0:
             continue
 
-        selected = [word for word in words[bisect_right(centers, start - 1e-6):bisect_right(centers, end)] if lexical(word['word'])]
-        if not selected or lexical(''.join(word['word'] for word in selected)) != lexical(row['text']):
+        if not verified:
             continue
         groups = []
         for word in selected:

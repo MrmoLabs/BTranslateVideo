@@ -51,6 +51,109 @@ def test_long_window_carries_last_unit_into_next_block(tmp_path, monkeypatch):
     assert lexical("".join(s["text"] for s in segments)) == lexical(raw[0]["text"])
 
 
+def test_final_pass_joins_a_phrase_split_between_model_windows(tmp_path,monkeypatch):
+    prefix=' '.join([f'w{i}' for i in range(237)]+['end.'])
+    raw=raw_words(prefix+' we could create a situation.',step=.2)
+    planner=lambda _url,_settings,words,*_: [dict(end=len(words),punct='.')]
+    monkeypatch.setattr('app.segmentation.plan_block',planner)
+    rows=semantic_segments(raw,60,'unused',Settings(),'course',Event(),tmp_path)
+    assert [r['text'] for r in rows]==[prefix.capitalize(),'We could create a situation.']
+    assert rows[1]['start']==raw[0]['words'][238]['start']
+    assert rows[1]['end']==raw[0]['words'][-1]['end']
+
+
+def test_only_continuous_in_sentence_cuts_are_sent_for_automatic_review(tmp_path,monkeypatch):
+    import httpx
+
+    raw=raw_words('The presenter handed the microphone to the student. We moved on.',step=.3)
+    monkeypatch.setattr('app.segmentation.plan_block',lambda *_:[
+        dict(end=3,punct='.'),dict(end=8,punct='.'),dict(end=11,punct='.')])
+    # A short beat before the object makes this an ambiguous review case.
+    raw[0]['words'][2]['end']-=.18
+    for word in raw[0]['words'][8:]:
+        word['start']+=2;word['end']+=2
+    seen=[]
+
+    async def post(url,payload,cancel,**_):
+        data=json.loads(payload['messages'][-1]['content'].removesuffix('\n/no_think'))
+        seen.append(data)
+        return httpx.Response(200,request=httpx.Request('POST',url),
+                              json={'choices':[{'message':{'content':'{"decisions":["join"]}'}}]})
+
+    monkeypatch.setattr('app.segmentation._post_cancellable',post)
+    args=(raw,30,'http://127.0.0.1/v1',Settings(),'course',Event(),tmp_path)
+    rows=semantic_segments(*args)
+    assert seen==[[{'left':'The presenter handed','right':'the microphone to the student.'}]]
+    assert [r['text'] for r in rows]==['The presenter handed the microphone to the student.','We moved on.']
+    assert rows[1]['start']==raw[0]['words'][8]['start']
+    assert semantic_segments(*args)==rows and len(seen)==1
+
+
+def test_short_asr_sentences_restore_real_boundaries_instead_of_joining_everything(tmp_path,monkeypatch):
+    from app.segmentation import repair_sentence_breaks
+
+    raw=raw_words('You actually spend time thinking about it. These are the main examples. That is all.',step=.25)
+    words=flatten_words(raw,10)
+    ends=[3,8,len(words)]
+    groups=[('You actually spend',0),('time thinking about it. These',3),('are the main examples. That is all.',8)]
+    rows=[dict(id=i,start=words[start]['start'],end=words[end-1]['end'],speaker='speaker_1',zh='',text=text)
+          for i,((text,start),end) in enumerate(zip(groups,ends),1)]
+    monkeypatch.setattr('app.segmentation.review_sentence_breaks',lambda *_:pytest.fail('short uninterrupted sentences can be fixed from ASR'))
+    result=repair_sentence_breaks(words,rows,ends,'unused',Settings(),Event(),tmp_path)
+    assert [r['text'] for r in result]==['You actually spend time thinking about it.','These are the main examples.','That is all.']
+    assert [r['end'] for r in result]==[words[index]['end'] for index in (6,11,len(words)-1)]
+    assert lexical(''.join(r['text'] for r in result))==lexical(raw[0]['text'])
+
+
+def test_failed_review_is_split_without_counting_unanswered_cuts_as_reviewed(tmp_path,monkeypatch):
+    from app.segmentation import reviewed_boundary_batch
+
+    seen=[]
+    def review(_url,_settings,items,_cancel):
+        seen.append(len(items))
+        if len(items)>4:
+            raise ValueError('wrong number of decisions')
+        if items[0]['id']==5:
+            raise ValueError('still malformed')
+        return {items[0]['id']}
+
+    monkeypatch.setattr('app.segmentation.review_sentence_breaks',review)
+    batch=[dict(id=i,left='a complete left',right='continues here') for i in range(1,9)]
+    joined,unreviewed=reviewed_boundary_batch('unused',Settings(),batch,Event(),tmp_path)
+    assert joined=={1} and unreviewed==4 and seen==[8,4,4]
+
+
+def test_numbered_grid_is_rejected_even_with_valid_word_ids():
+    from app.segmentation import mechanical_numbered_plan, source_punctuation_plan
+
+    raw=raw_words(' '.join(['The speaker explains the topic to everyone.']*5),step=.3)
+    words=flatten_words(raw,30)
+    cuts=[dict(end=i,punct='.') for i in range(2,len(words),2)]+[dict(end=len(words),punct='.')]
+    assert mechanical_numbered_plan(cuts,words)
+    source=source_punctuation_plan(words,'course')
+    assert [cut['end'] for cut in source]==[7,14,21,28,35]
+    assert not mechanical_numbered_plan(source,words)
+
+
+def test_continuation_drops_invented_period_and_real_question_is_restored(tmp_path):
+    from app.segmentation import audit_boundary_checks, reconcile_punctuation
+
+    raw=raw_words('Does everyone know what a cold call is? They nod.',step=.3)
+    words=flatten_words(raw,10)
+    ends=[3,8,10]
+    rows=[
+        dict(id=i,start=words[start]['start'],end=words[end-1]['end'],speaker='speaker_1',text=text)
+        for i,(start,end,text) in enumerate(zip([0,3,8],ends,['Does everyone know.','What a cold call is.','They nod.']),1)
+    ]
+    corrected=reconcile_punctuation(words,rows,ends)
+    assert [row['text'] for row in corrected]==['Does everyone know','what a cold call is?','They nod.']
+    assert lexical(''.join(row['text'] for row in corrected))==lexical(raw[0]['text'])
+    path=tmp_path/'asr.json';atomic_json(path,raw)
+    warnings=audit_boundary_checks(rows,path,10)
+    assert warnings['1']['issues'][0]['code']=='asr_sentence_split'
+    assert warnings['2']['issues']==[{'code':'asr_terminal_punctuation','punctuation':'?'}]
+
+
 def test_clipped_final_phrase_merges_with_previous_thought(tmp_path, monkeypatch):
     raw = raw_words("set model dimension the dimension of the")
     monkeypatch.setattr("app.segmentation.plan_block", lambda *_: [dict(end=3, punct="."), dict(end=7, punct=".")])
@@ -89,7 +192,7 @@ def test_failed_resegment_preserves_edits_then_success_backs_up(tmp_path, monkey
     def translator(*_):
         yield "unused"
     monkeypatch.setattr("app.pipeline.local_translator", translator)
-    def fail(*_):
+    def fail(*_,**_options):
         raise ValueError("bad plan")
     monkeypatch.setattr("app.pipeline.semantic_segments", fail)
     try:
@@ -100,7 +203,7 @@ def test_failed_resegment_preserves_edits_then_success_backs_up(tmp_path, monkey
         assert unchanged["outputs"] == {"video": "result.mkv"}
         assert not (folder / "history").exists()
         new = [dict(old[0], text="Hello there.", zh="")]
-        monkeypatch.setattr("app.pipeline.semantic_segments", lambda *_: new)
+        monkeypatch.setattr("app.pipeline.semantic_segments", lambda *_,**_options: new)
         pipeline.analyze(identifier, Settings(), Event(), force=True)
         updated = store.read(identifier)
         assert updated["segments"] == new
@@ -198,6 +301,42 @@ def test_planner_switches_to_boundary_only_after_unusable_rewrites(tmp_path, mon
     assert len(list(tmp_path.glob("attempt-*.json"))) == 2
 
 
+def test_invalid_boundary_numbers_fall_back_to_original_punctuation(tmp_path,monkeypatch):
+    import httpx
+    from app.segmentation import plan_block,source_text
+
+    raw=raw_words("It was hard. We could keep working.")
+    words=flatten_words(raw,20)
+    calls=[]
+    async def response(url,payload,cancel):
+        calls.append(payload)
+        content=({"sentences":["The paragraph was polished."]} if len(calls)<=2
+                 else {"cuts":[{"end":3,"punct":"."},{"end":len(words)+3,"punct":"."}]})
+        return httpx.Response(200,request=httpx.Request("POST",url),json={
+            "choices":[{"message":{"content":json.dumps(content)}}]})
+
+    monkeypatch.setattr('app.segmentation._post_cancellable',response)
+    result=plan_block("http://127.0.0.1/v1",Settings(),words,"","course",Event(),tmp_path)
+    assert [part['end'] for part in result]==[3,len(words)] and len(calls)==3
+    assert source_text(words[3:result[-1]['end']],result[-1]['punct'])=="We could keep working."
+    fallback=json.loads((tmp_path/'fallback.json').read_text(encoding='utf-8'))
+    assert fallback['words']==len(words) and '超出本批' in fallback['error']
+
+
+def test_remote_request_failure_does_not_turn_into_successful_fallback(tmp_path,monkeypatch):
+    import httpx
+    from app.segmentation import plan_block
+
+    async def response(url,payload,cancel):
+        return httpx.Response(504,request=httpx.Request("POST",url))
+
+    monkeypatch.setattr('app.segmentation._post_cancellable',response)
+    with pytest.raises(RuntimeError,match='504'):
+        plan_block("http://127.0.0.1/v1",Settings(),flatten_words(raw_words("This is a sentence."),20),"",
+                   "course",Event(),tmp_path)
+    assert not (tmp_path/'fallback.json').exists()
+
+
 def test_existing_v6_cache_is_validated_and_reused(tmp_path, monkeypatch):
     import hashlib
     from app.segmentation import VERSION
@@ -238,6 +377,95 @@ def test_chinese_condition_and_consequence_are_rejoined():
     repaired=parse_cuts(plan,words,repair=True)
     assert [part['end'] for part in repaired]==[4]
     assert lexical(repaired[0]['text'])==lexical(raw[0]['text'])
+
+
+@pytest.mark.parametrize(('before','after'),[
+    ('What word did many', 'of us miss?'),
+    ("Oh my goodness, I'm", 'nervous.'),
+    ('And the same is true when', 'it comes to speaking.'),
+    ("We didn't", 'get it right.'),
+    ('Say the first thing that comes to', 'your mind.'),
+    ('A question related to', 'communicating.'),
+    ('You need', 'to have your anxiety under control.'),
+    ('Some ground rules for', 'the interactivity today.'),
+    ('And I invite you', 'to participate.'),
+    ('85%', 'of people feel nervous.'),
+    ('85', '% of people feel nervous.'),
+    ('We could', 'create a situation.'),
+    ('In', 'fact, that happens often.'),
+    ('The study asked', 'Americans, what do you fear?'),
+    ('What does', 'it feel like?'),
+    ('Watching a nervous', 'speaker present?'),
+])
+def test_english_continuations_are_flagged_and_rejoined(before,after):
+    from app.segmentation import EnglishContinuationError,boundary_checks,parse_cuts
+
+    raw=raw_words(before+' '+after)
+    words=flatten_words(raw,30)
+    end=len(before.split())
+    cut=json.dumps(dict(cuts=[dict(end=end),dict(end=len(words),punct=after[-1])]))
+    with pytest.raises(EnglishContinuationError):
+        parse_cuts(cut,words)
+    result=parse_cuts(cut,words,repair=True)
+    assert len(result)==1 and lexical(result[0]['text'])==lexical(raw[0]['text'])
+    rows=[dict(id=1,speaker='A',start=0,end=1,text=before+'.'),
+          dict(id=2,speaker='A',start=1,end=2,text=after)]
+    assert boundary_checks(rows)['1']['issues']==[dict(code='english_continuation',next_id=2,next_source=after)]
+
+
+def test_english_continuation_respects_source_punctuation_and_speaker():
+    from app.segmentation import parse_cuts
+
+    for source in ("No, we didn't. Get it right.", "No, we didn't get it right."):
+        words=flatten_words(raw_words(source),30)
+        if "didn't." not in source:
+            for word in words[3:]:
+                word['speaker']='other'
+        cut=json.dumps(dict(cuts=[dict(end=3),dict(end=len(words))]))
+        assert [part['end'] for part in parse_cuts(cut,words,repair=True)]==[3,len(words)]
+
+
+def test_many_rejected_cuts_recover_source_sentence_boundaries():
+    from app.segmentation import parse_cuts
+
+    sentence='A surprisingly large share of people could speak at the event without any preparation.'
+    raw=raw_words(' '.join([sentence]*8),step=.5)
+    words=flatten_words(raw,80)
+    size=len(sentence.split())
+    mid=sentence.split().index('could')+1
+    cuts=[dict(end=start+mid,punct='.') for start in range(0,len(words),size)]
+    cuts.append(dict(end=len(words),punct='.'))
+    repaired=parse_cuts(json.dumps({'cuts':cuts}),words,repair=True)
+    assert [part['end'] for part in repaired]==list(range(size,len(words)+1,size))
+    assert lexical(''.join(part['text'] for part in repaired))==lexical(raw[0]['text'])
+
+
+def test_cached_english_boundary_is_repaired_without_calling_model(tmp_path,monkeypatch):
+    from app.config import atomic_json
+
+    raw=raw_words('What word did many of us miss?')
+    settings=Settings()
+    monkeypatch.setattr('app.segmentation.plan_block',lambda *_:[dict(end=7,punct='?')])
+    semantic_segments(raw,30,'unused',settings,'course',Event(),tmp_path)
+    [cache]=tmp_path.glob('sentences-*.json')
+    atomic_json(cache,dict(cuts=[dict(end=4),dict(end=7,punct='?')]))
+    monkeypatch.setattr('app.segmentation.plan_block',lambda *_:pytest.fail('Valid words can be rejoined from the cache'))
+    rows=semantic_segments(raw,30,'unused',settings,'course',Event(),tmp_path)
+    assert len(rows)==1 and rows[0]['text']=='What word did many of us miss?'
+
+
+def test_local_segmentation_is_independent_of_the_translation_provider():
+    from app.model_backends import uses_translation_service
+    from app.segmentation import segmentation_settings
+
+    remote = Settings(translation_provider='bilibili')
+    assert segmentation_settings(remote) is remote
+    requested = remote.model_copy(update={'segmentation_provider':'llama_cpp'})
+    planner = segmentation_settings(requested)
+    assert requested.translation_provider=='bilibili' and uses_translation_service(requested)
+    assert planner.translation_provider=='llama_cpp' and not uses_translation_service(planner)
+    assert planner.translation_model==remote.translation_model and planner.translation_json_mode
+    assert segmentation_settings(planner) is planner
 
 
 def test_minute_coding_pause_is_a_batch_boundary_after_complete_thought(tmp_path, monkeypatch):

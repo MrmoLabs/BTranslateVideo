@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from .file_io import atomic_json
 
-RUNTIME_FIELDS=frozenset({'status','stage','progress','processing','error','logs','tts_runtime','subtitle_review','updated'})
+RUNTIME_FIELDS=frozenset({'status','stage','progress','processing','error','logs','tts_runtime','subtitle_review','translation_preview','updated'})
 
 
 class ProjectStateFiles:

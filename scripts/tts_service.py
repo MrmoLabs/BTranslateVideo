@@ -6,8 +6,9 @@ from pathlib import Path
 
 
 def refresh_reference_cache(model, clips, signatures):
-    for clip in clips:
-        reference = clip['reference']
+    references = {clip['reference'] for clip in clips}
+    references.update(clip['emotion_reference'] for clip in clips if clip.get('emotion_reference'))
+    for reference in references:
         digest = hashlib.sha256(Path(reference).read_bytes()).hexdigest()
         if reference in signatures and signatures[reference] != digest:
             if getattr(model, 'cache_spk_audio_prompt', None) == reference:

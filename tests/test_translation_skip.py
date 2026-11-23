@@ -14,8 +14,55 @@ from app.translation_quality import TranslationRequestError, _request
 from app.translation_proposals import generate_proposal, read_proposal
 
 
+def test_parallel_translation_commits_in_order_with_a_stable_batch_context():
+    from threading import Barrier
+    from app.pipeline import translation_results
+
+    rows = [cue(i, f'Line {i}.') for i in range(1, 5)]
+    ready = Barrier(2, timeout=2)
+
+    def request(indices, context):
+        ready.wait()
+        return {row['id']: row['zh'] for row in context}
+
+    requests = translation_results(rows, list(range(4)), Settings(translation_batch=1), 2, request)
+    first, first_context = next(requests)
+    assert first == [0] and first_context[2] == ''
+    rows[0]['zh'] = 'Prior translation'
+    second, second_context = next(requests)
+    assert second == [1] and second_context[1] == ''
+    third, third_context = next(requests)
+    assert third == [2] and third_context[1] == 'Prior translation'
+    assert [indices for indices, _ in requests] == [[3]]
+
+
 def cue(identifier,text,zh=''):
     return dict(id=identifier,start=identifier*3,end=identifier*3+2.8,text=text,zh=zh,speaker='speaker_1')
+
+
+def test_online_translation_publishes_a_fast_batch_while_an_earlier_batch_waits():
+    from app.model_backends import translation_parallelism
+    from app.translation_quality import translation_results
+
+    settings = Settings(translation_provider='openai_remote', translation_api_url='https://example.com/v1',
+                        translation_remote_batch=1, translation_parallel=2)
+    rows = [cue(i, f'Line {i}.') for i in range(1, 4)]
+    release = threading.Event()
+
+    def request(indices, context):
+        if indices == [0]:
+            assert release.wait(5)
+        return {row['id']: row['zh'] for row in context}
+
+    results = translation_results(rows, range(3), settings, translation_parallelism(settings), request)
+    try:
+        assert next(results)[0] == [1]
+        rows[1]['zh'] = 'New translation'
+        third, context = next(results)
+        assert third == [2] and context[2] == ''
+    finally:
+        release.set()
+    assert [indices for indices, _ in results] == [[0]]
 
 
 @pytest.fixture
@@ -50,7 +97,12 @@ def test_isolates_bad_cue_and_keeps_siblings_without_invalid_cache(tmp_path,mode
     assert set(result)=={7,9} and [value[0] for value in failures]==[8]
     assert rows==original
     assert all('8' not in json.loads(path.read_text(encoding='utf-8')) for path in tmp_path.glob('translation-*.json'))
-    assert any(len(call['segments'])==1 and call['segments'][0]['text']=='Welcome.' for call in model['calls'])
+    if mode=='number':
+        assert len(model['calls'])==4
+        assert all([row['text'] for row in call['segments']]==['8 people.'] for call in model['calls'][1:])
+        assert model['calls'][1]['context'][-1]['zh']=='有效译文。'
+    else:
+        assert any(len(call['segments'])==1 and call['segments'][0]['text']=='Welcome.' for call in model['calls'])
 
 
 @pytest.mark.parametrize('mode',['offline','http'])

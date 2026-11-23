@@ -131,7 +131,8 @@ def test_synthesis_finishes_all_clips_and_durable_stats_while_progress_is_locked
     from scripts import tts_batch as batch
     cuda=SimpleNamespace(mem_get_info=lambda:(8*1024**3,16*1024**3),memory_reserved=lambda:0,memory_allocated=lambda:0,empty_cache=lambda:None,synchronize=lambda:None,max_memory_allocated=lambda:0)
     monkeypatch.setitem(sys.modules,'torch',SimpleNamespace(cuda=cuda))
-    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True)
+    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,
+                          cache_emo_audio_prompt='same.wav',cache_emo_cond=True)
     rows=[dict(id=i,text='测试文本',reference='same.wav',output=str(tmp_path/f'{i}.wav')) for i in range(4)]
     def generate(_model,group):
         for row in group:Path(row['output']).write_bytes(b'completed audio')

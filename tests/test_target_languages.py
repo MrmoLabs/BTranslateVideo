@@ -101,7 +101,8 @@ def test_non_chinese_uses_correct_native_language_without_chinese_batching(tmp_p
     monkeypatch.setitem(sys.modules,'torch',SimpleNamespace(cuda=cuda))
     calls=[]
     def infer(**kwargs):calls.append(kwargs);Path(kwargs['output_path']).write_bytes(b'voice')
-    model=SimpleNamespace(cache_spk_audio_prompt='reference',cache_spk_cond=True,infer=infer)
+    model=SimpleNamespace(cache_spk_audio_prompt='reference',cache_spk_cond=True,
+                          cache_emo_audio_prompt='reference',cache_emo_cond=True,infer=infer)
     monkeypatch.setattr(batch,'native_batch',lambda *_:(_ for _ in ()).throw(AssertionError('Chinese batching must not be used')))
     clips=[dict(id=i,text='sample',reference='reference',output=str(tmp_path/f'{i}.wav'),lang=language) for i in range(2)]
     stats=batch.run_clips(model,clips,4)
@@ -138,7 +139,8 @@ def test_different_target_languages_are_never_combined_in_one_native_batch(tmp_p
         native.append([clip['lang'] for clip in clips])
         for clip in clips:Path(clip['output']).write_bytes(b'voice')
     monkeypatch.setattr(batch,'native_batch',grouped)
-    model=SimpleNamespace(cache_spk_audio_prompt='reference',cache_spk_cond=True,infer=infer)
+    model=SimpleNamespace(cache_spk_audio_prompt='reference',cache_spk_cond=True,
+                          cache_emo_audio_prompt='reference',cache_emo_cond=True,infer=infer)
     clips=[dict(id=i,text='sample',reference='reference',output=str(tmp_path/f'{i}.wav'),lang=lang) for i,lang in enumerate(['ZH','ZH','EN','EN'])]
     batch.run_clips(model,clips,4)
     assert native==[['ZH','ZH']] and singles==['EN','EN']

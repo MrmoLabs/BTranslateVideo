@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.emotions import emotion_fields,emotion_key,emotion_vector
-from app.pipeline import Pipeline,make_voice_clip
+from app.pipeline import Pipeline,make_voice_clip,source_emotion_overlaps,source_emotion_reference
 from app.server import create_app
 from app.subtitles import validate_segments
 
@@ -26,6 +26,36 @@ def test_expression_changes_cache_identity_but_default_preserves_it(tmp_path):
     strong=make_voice_clip(row(emotion='happy',emotion_strength='high'),*args)
     sad=make_voice_clip(row(emotion='sad'),*args)
     assert len({base['output'],happy['output'],strong['output'],sad['output']})==4
+
+
+def test_source_emotion_reference_is_skipped_for_overlap_and_changes_cache_key(tmp_path, monkeypatch):
+    line = row(emotion='source')
+    other = {**row(), 'id': 2, 'start': 4, 'end': 5, 'speaker': 'guest'}
+    project = dict(segments=[line, other], media=dict(duration=6))
+    prompt = tmp_path/'source.wav'
+    with wave.open(str(prompt), 'wb') as stream:
+        stream.setparams((1, 2, 24000, 0, 'NONE', 'not compressed'))
+        stream.writeframes(b'\x01\x00' * 24000)
+    calls = []
+
+    def source_audio(_folder, start, end, _settings, _cancel):
+        calls.append((start, end))
+        return prompt
+
+    monkeypatch.setattr('app.source_audio.source_audio_range', source_audio)
+    settings = Settings()
+    cancel = threading.Event()
+    assert source_emotion_reference(project,line,tmp_path,settings,cancel,source_emotion_overlaps(project)) is None
+    assert calls == []
+    project['segments'].pop()
+    reference = source_emotion_reference(project,line,tmp_path,settings,cancel,source_emotion_overlaps(project))
+    assert reference == prompt and calls == [(0, 5)]
+    args = (line,tmp_path,'role.wav',settings,[],'voice hash')
+    inherited = make_voice_clip(*args)
+    sourced = make_voice_clip(*args,emotion_reference=reference)
+    assert sourced['reference'] == inherited['reference']
+    assert sourced['output'] != inherited['output']
+    assert sourced['emotion_reference'] == str(prompt)
 
 def test_scheduler_does_not_mix_emotion_or_strength_in_a_batch(tmp_path):
     spec=importlib.util.spec_from_file_location('emotion_batch',Path(__file__).parents[1]/'scripts/tts_batch.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

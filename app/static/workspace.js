@@ -131,7 +131,7 @@ function boardRows(){
   const query=$('#voice-row-search').value.trim().toLowerCase(),speaker=$('#voice-speaker-filter').value;
   return state.rows.map((row,index)=>({row,index})).filter(({row})=>(!state.alignmentOnly||state.alignmentProject!==state.id||alignmentProblemIds().has(row.id))&&(!speaker||row.speaker===speaker)&&(!query||`${row.id} ${row.text} ${row.zh}`.toLowerCase().includes(query)));
 }
-function emotionOptions(value,keep=false){return (keep?`<option value="">${esc(tr('保持原设置'))}</option>`:'')+Object.entries(emotions).map(([id,name])=>`<option value="${id}" ${id===value?'selected':''}>${esc(tr(name))}</option>`).join('');}
+function emotionOptions(value,keep=false,includeSource=true){return (keep?`<option value="">${esc(tr('保持原设置'))}</option>`:'')+Object.entries(emotions).filter(([id])=>includeSource||id!=='source').map(([id,name])=>`<option value="${id}" ${id===value?'selected':''}>${esc(tr(name))}</option>`).join('');}
 function strengthOptions(value,keep=false){return (keep?`<option value="">${esc(tr('保持原设置'))}</option>`:'')+Object.entries(strengths).map(([id,name])=>`<option value="${id}" ${id===value?'selected':''}>${esc(tr(name))}</option>`).join('');}
 function renderBulkOptions(){
   $('#bulk-emotion').innerHTML=emotionOptions('',true);$('#bulk-strength').innerHTML=strengthOptions('',true);
@@ -145,6 +145,7 @@ function updateBoardControls(){
   $('#voice-check-page').checked=visible.length>0&&visible.every(({row})=>state.voiceChecked.has(row.id));
   $('#voice-check-page').indeterminate=visible.some(({row})=>state.voiceChecked.has(row.id))&&!$('#voice-check-page').checked;
   $('#apply-voice-batch').disabled=busy||!selected;$('#save-voice-board').disabled=busy||!!state.projectUnavailable||!state.dirty;
+  $('#follow-source-all').disabled=busy||!!state.projectUnavailable||!state.rows.some(row=>row.emotion!=='source');
   $$('[data-board-field]').forEach(el=>el.disabled=busy||(el.dataset.boardField==='emotion_strength'&&!(state.rows[Number(el.dataset.index)]?.emotion)));
 }
 const originalEditingControls=renderEditingControls;
@@ -169,7 +170,7 @@ function renderVoiceBoard(force=false){
   const visible=items.slice(state.voicePage*size,(state.voicePage+1)*size),busy=active(state.project)||state.saving;
   const alignment=state.project.alignment_report;
   const canShorten=alignment?.status==='blocked'&&alignment.revision===state.editorRevision&&!state.dirty&&['en','ja'].includes(state.project.target_language);
-  const measured=new Set(canShorten?(alignment.conflicts||[]).filter(item=>item.voice_seconds>item.window_seconds).map(item=>item.id):[]);
+  const measured=new Set(canShorten?(alignment.conflicts||[]).filter(item=>{const capacity=item.max_voice_seconds??item.window_seconds;const target=item.reason==='neighbour'?Math.min(capacity,item.window_seconds):capacity;return target>0&&item.voice_seconds>target;}).map(item=>item.id):[]);
   const key=JSON.stringify([state.id,visible,speakerKey,state.project.translation_checks,state.voicePage,size,[...state.voiceChecked],busy,[...measured],I18N.locale()]);
   if(key!==state.boardKey){state.boardKey=key;
     $('#voice-table-body').innerHTML=visible.map(({row:r,index:i})=>`<tr class="${i===state.selected?'current':''}"><td><input type="checkbox" data-board-check="${r.id}" aria-label="${esc(tr('选择第 {0} 句',r.id))}" ${state.voiceChecked.has(r.id)?'checked':''}></td><td class="cue-cell"><b>${r.id}</b><small>${clock(r.start)}–${clock(r.end)}</small></td><td class="script-cell"><textarea dir="auto" rows="2" data-board-field="zh" data-index="${i}" aria-label="${esc(tr('第 {0} 句译文',r.id))}">${esc(r.zh)}</textarea><details><summary>${esc(tr('原文'))}</summary><p dir="auto">${esc(r.text)}</p></details>${translationCheckMarkup(r)}${measured.has(r.id)&&r.zh.trim()?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="shorten" ${busy?'disabled':''}>${esc(tr('按实测时长生成短稿'))}</button>`:''}${state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&state.project.retranslation.mode&&state.project.retranslation.mode!=='translate'?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="${esc(state.project.retranslation.mode)}">${esc(tr('查看本句校对建议'))}</button>`:''}</td><td data-label="${esc(tr('角色'))}" class="role-cell"><select data-board-field="speaker" data-index="${i}" aria-label="${esc(tr('第 {0} 句角色',r.id))}" title="${esc(roleOptionText(r.speaker))}">${roleOptions(speakers,r.speaker,true)}</select><small class="role-voice-caption" title="${esc(roleVoiceName(r.speaker))}">${esc(tr('音色：{0}',roleVoiceName(r.speaker)))}</small></td><td data-label="${esc(tr('表达情绪'))}"><select data-board-field="emotion" data-index="${i}" aria-label="${esc(tr('第 {0} 句情绪',r.id))}">${emotionOptions(r.emotion||'inherit')}</select></td><td data-label="${esc(tr('情绪强度'))}"><select data-board-field="emotion_strength" data-index="${i}" aria-label="${esc(tr('第 {0} 句强度',r.id))}">${strengthOptions(r.emotion_strength||'medium')}</select></td><td><button data-board-detail="${i}">${esc(tr('细调 / 试听'))}</button></td></tr>`).join('')||`<tr><td colspan="7" class="empty-inline">${esc(tr('没有匹配的句子'))}</td></tr>`;
@@ -181,6 +182,11 @@ function renderVoiceBoard(force=false){
 function setRowExpression(row,emotion,strength){
   if(emotion==='inherit'){delete row.emotion;delete row.emotion_strength;}
   else {if(emotion)row.emotion=emotion;if(row.emotion)row.emotion_strength=strength||row.emotion_strength||'medium';}
+}
+function renderVoiceBatchChange(changed){
+  setDirty(true);state.boardKey=null;state.voiceKey=null;
+  renderSentenceList();renderEditors();renderVoices();renderVoiceBoard();
+  toast(tr('已修改 {0} 句，保存后用于整片配音',changed));
 }
 $('#voice-table-body').oninput=e=>{
   const el=e.target,field=el.dataset.boardField;if(!field||active(state.project))return;
@@ -200,6 +206,16 @@ $('#voice-table-body').onclick=e=>{const button=e.target.closest('[data-board-de
 function openSingle(){if(!currentRow())return;renderEditors();if(!$('#single-voice-editor').open)openCueDialog($('#single-voice-editor'));}
 $('#open-single-editor').onclick=openSingle;
 $('#save-voice-board').onclick=()=>guard(saveSegments);
+$('#follow-source-all').onclick=()=>{
+  if(!state.project||active(state.project)||state.saving||state.projectUnavailable)return;
+  let changed=0;
+  for(const row of state.rows){
+    if(row.emotion==='source')continue;
+    setRowExpression(row,'source','');
+    changed++;
+  }
+  if(changed)renderVoiceBatchChange(changed);
+};
 for(const id of ['voice-row-search','voice-speaker-filter','voice-page-size'])$('#'+id).addEventListener(id==='voice-row-search'?'input':'change',()=>{state.voicePage=0;state.boardKey=null;renderVoiceBoard(true);});
 $('#voice-page-prev').onclick=()=>{state.voicePage--;renderVoiceBoard();};$('#voice-page-next').onclick=()=>{state.voicePage++;renderVoiceBoard();};
 $('#voice-check-page').onchange=e=>{const size=Number($('#voice-page-size').value);boardRows().slice(state.voicePage*size,(state.voicePage+1)*size).forEach(({row})=>e.target.checked?state.voiceChecked.add(row.id):state.voiceChecked.delete(row.id));state.boardKey=null;renderVoiceBoard();};
@@ -213,7 +229,7 @@ $('#apply-voice-batch').onclick=()=>guard(async()=>{
   let changed=0;
   rows.forEach(row=>{const before=JSON.stringify(row);if(speaker)row.speaker=speaker;setRowExpression(row,emotion,strength);if(JSON.stringify(row)!==before)changed++;});
   if(!changed){toast(tr('所选句子无需更改；沿用参考音时不单独设置强度。'));return;}
-  setDirty(true);state.boardKey=null;state.voiceKey=null;renderSentenceList();renderEditors();renderVoices();renderVoiceBoard();toast(tr('已修改 {0} 句，保存后用于整片配音',changed));
+  renderVoiceBatchChange(changed);
 });
 
 function logLevel(text){return /error|failed|exception|traceback|失败|错误/i.test(text)?'error':/warn|警告|降级/i.test(text)?'warning':'info';}
@@ -307,7 +323,7 @@ function requireAppliedTarget(){
   if(state.changingTarget||state.targetSelectionDirty)throw Error(tr('请先应用所选语言，再翻译或生成配音。'));
 }
 const runBeforeTarget=run;
-run=async function(stage){if(['translate','optimize','dub','all','audition','export','preview'].includes(stage))requireAppliedTarget();return runBeforeTarget(stage);};
+run=async function(stage){if(['translate','optimize','retranslate_all','dub','all','audition','export','preview'].includes(stage))requireAppliedTarget();return runBeforeTarget(stage);};
 const auditionBeforeTarget=runAudition;
 runAudition=async function(video=false){requireAppliedTarget();return auditionBeforeTarget(video);};
 
@@ -408,7 +424,7 @@ function translationCheckMarkup(row){const checks=translationChecks(row);return 
 
 // Subtitle review: simultaneous source/translation editing with document scrolling.
 filteredRows=function(){const query=$('#segment-search').value.trim().toLowerCase(),filter=$('#subtitle-filter').value;
-  return state.rows.map((r,i)=>({r,i})).filter(({r})=>(!query||`${r.id} ${r.text} ${r.zh}`.toLowerCase().includes(query))&&(filter!=='missing'||!r.zh.trim())&&(filter!=='translated'||!!r.zh.trim())&&(filter!=='checks'||translationChecks(r).length>0)&&(window.SubtitleTools?.matches(r,filter)??true));
+  return state.rows.map((r,i)=>({r,i})).filter(({r})=>(!query||`${r.id} ${r.text} ${r.zh} ${proposalEditText(inlineRetranslation(r))}`.toLowerCase().includes(query))&&(filter!=='missing'||!r.zh.trim())&&(filter!=='translated'||!!r.zh.trim())&&(filter!=='checks'||translationChecks(r).length>0)&&(window.SubtitleTools?.matches(r,filter)??true));
 };
 renderSentenceList=function(force=false){
   if(state.subtitleProject!==state.id){state.subtitleProject=state.id;state.listPage=0;state.subtitleKey=null;$('#subtitle-filter').value='all';}
@@ -418,8 +434,9 @@ renderSentenceList=function(force=false){
   $('#segments-prev').disabled=!state.listPage;$('#segments-next').disabled=state.listPage>=pages-1;
   if(!force&&$('#segment-list').contains(document.activeElement)&&document.activeElement.matches('textarea')){updateReviewControls();return;}
   const checksCount=state.rows.filter(row=>translationChecks(row).length).length;$('#translation-check-count').hidden=!checksCount;$('#translation-check-count').textContent=tr('待核对 {0} 句',checksCount);
-  const key=JSON.stringify([state.id,visible,state.project.retranslation,state.project.translation_checks,busy,I18N.locale()]);if(key===state.subtitleKey)return;state.subtitleKey=key;
-  $('#segment-list').innerHTML=visible.map(({r,i})=>`<tr><td class="review-cue"><b>${esc(tr('第 {0} 句',r.id))}</b><small>${clock(r.start)}–${clock(r.end)}</small><small>${esc(tr('时长 {0} 秒',Number((r.end-r.start).toFixed(2))))}</small><small>${esc(roleName(r.speaker))}</small><span class="badge">${esc(tr(r.zh.trim()?'已翻译':'待翻译'))}</span></td><td data-label="${esc(tr('原文'))}"><textarea dir="auto" rows="1" data-review-field="text" data-index="${i}" aria-label="${esc(tr('第 {0} 句原文',r.id))}" ${busy?'disabled':''}>${esc(r.text)}</textarea></td><td data-label="${esc(tr('译文配音稿'))}"><textarea dir="auto" rows="1" data-review-field="zh" data-index="${i}" aria-label="${esc(tr('第 {0} 句译文',r.id))}" ${busy?'disabled':''}>${esc(r.zh)}</textarea>${translationCheckMarkup(r)}${state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&state.project.retranslation.mode&&state.project.retranslation.mode!=='translate'?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="${esc(state.project.retranslation.mode)}">${esc(tr('查看本句校对建议'))}</button>`:''}</td><td><button type="button" class="text-button" data-source-audio="${r.id}" aria-label="${esc(tr('听第 {0} 句原声',r.id))}">${esc(tr('听原声'))}</button><button data-cue-detail="${i}">${esc(tr('详情'))}</button><details class="cue-more"><summary>${esc(tr('更多'))}</summary><div><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="asr" ${busy?'disabled':''}>${esc(tr('重新识别原文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="source" ${busy?'disabled':''}>${esc(tr('润色原文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="translation" ${busy?'disabled':''}>${esc(tr('润色译文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="both" ${busy?'disabled':''}>${esc(tr('联合校对'))}</button><button data-retranslate="${r.id}" ${busy?'disabled':''}>${esc(tr(state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&(!state.project.retranslation.mode||state.project.retranslation.mode==='translate')?'查看新译文':'重新翻译'))}</button><button data-cue-voice="${i}" class="text-button">${esc(tr('细调 / 试听'))}</button></div></details></td></tr>`).join('')||`<tr><td colspan="5" class="empty-inline">${esc(tr(state.rows.length?'没有匹配的句子':'先识别原文，或导入原文 SRT。字幕会显示在这里。'))}</td></tr>`;
+  const pending=visible.map(({r})=>inlineRetranslation(r));
+  const key=JSON.stringify([state.id,visible,pending.map(proposalEditText),state.proposal?.allow_edits,state.project.retranslation,state.project.translation_checks,busy,I18N.locale()]);if(key===state.subtitleKey)return;state.subtitleKey=key;
+  $('#segment-list').innerHTML=visible.map(({r,i},index)=>`<tr><td class="review-cue"><b>${esc(tr('第 {0} 句',r.id))}</b><small>${clock(r.start)}–${clock(r.end)}</small><small>${esc(tr('时长 {0} 秒',Number((r.end-r.start).toFixed(2))))}</small><small>${esc(roleName(r.speaker))}</small><span class="badge">${esc(tr(pending[index]?'译文待采用':r.zh.trim()?'已翻译':'待翻译'))}</span></td><td data-label="${esc(tr('原文'))}"><textarea dir="auto" rows="1" data-review-field="text" data-index="${i}" aria-label="${esc(tr('第 {0} 句原文',r.id))}" ${busy?'disabled':''}>${esc(r.text)}</textarea></td><td data-label="${esc(tr('译文配音稿'))}">${pending[index]?`<div class="retranslated-subtitle"><b>${esc(tr('新译文'))}</b>${proposalTextMarkup(pending[index],true)}</div>`:''}<textarea dir="auto" rows="1" data-review-field="zh" data-index="${i}" aria-label="${esc(tr('第 {0} 句译文',r.id))}" ${busy?'disabled':''}>${esc(r.zh)}</textarea>${translationCheckMarkup(r)}${state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&state.project.retranslation.mode&&state.project.retranslation.mode!=='translate'?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="${esc(state.project.retranslation.mode)}">${esc(tr('查看本句校对建议'))}</button>`:''}</td><td><button type="button" class="text-button" data-source-audio="${r.id}" aria-label="${esc(tr('听第 {0} 句原声',r.id))}">${esc(tr('听原声'))}</button><button data-cue-detail="${i}">${esc(tr('详情'))}</button><details class="cue-more"><summary>${esc(tr('更多'))}</summary><div><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="asr" ${busy?'disabled':''}>${esc(tr('重新识别原文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="source" ${busy?'disabled':''}>${esc(tr('润色原文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="translation" ${busy?'disabled':''}>${esc(tr('润色译文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="both" ${busy?'disabled':''}>${esc(tr('联合校对'))}</button><button data-retranslate="${r.id}" ${busy?'disabled':''}>${esc(tr(state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&(!state.project.retranslation.mode||state.project.retranslation.mode==='translate')?'查看新译文':'重新翻译'))}</button><button data-cue-voice="${i}" class="text-button">${esc(tr('细调 / 试听'))}</button></div></details></td></tr>`).join('')||`<tr><td colspan="5" class="empty-inline">${esc(tr(state.rows.length?'没有匹配的句子':'先识别原文，或导入原文 SRT。字幕会显示在这里。'))}</td></tr>`;
   $$('#segment-list textarea').forEach(growTextarea);
 };
 function growTextarea(el){el.style.height='auto';el.style.height=Math.max(84,el.scrollHeight+2)+'px';}
@@ -455,6 +472,7 @@ function updateSettingsDraft(){
 $('#settings-form').oninput=()=>{state.settingsGeneration=(state.settingsGeneration||0)+1;state.settingsDirty=true;updateSettingsDraft();};
 $('#reset-settings').onclick=()=>guard(async()=>{
   if(state.settingsDirty&&await confirmChoice(tr('放弃尚未保存的设置修改，恢复上次保存的内容？'),{title:tr('放弃设置修改'),proceed:tr('放弃修改')})==='cancel')return;
+  $('#settings-form').elements.translation_api_key.value='';$('#clear-translation-api-key').checked=false;
   Object.entries(state.settings).forEach(([k,v])=>{const el=$('#settings-form').elements[k];if(el)el.value=v;});state.settingsDirty=false;updateSettingsDraft();
 });
 $('#settings-form').onsubmit=async e=>{
@@ -462,12 +480,13 @@ $('#settings-form').onsubmit=async e=>{
   if(!$('#settings-form').elements.tts_idle_minutes.value.trim()){$('#settings-error').textContent=tr('请填写保温时长，0 表示任务后卸载');return;}
   const generation=state.settingsGeneration||0;state.settingsSaving=true;$('#save-settings').disabled=true;$('#settings-error').textContent='';updateSettingsDraft();
   try{
-    const data={...state.settings,...Object.fromEntries(new FormData(e.target))};
-    for(const k of ['max_speed','max_lead','max_lag','alignment_fallback_speed','alignment_fallback_lead','alignment_fallback_lag','audio_workers','tts_batch_size','tts_idle_minutes','translation_batch','model_service_timeout'])data[k]=Number(data[k]);
-    data.translation_compact=[true,'true'].includes(data.translation_compact);data.tts_keep_loaded=[true,'true'].includes(data.tts_keep_loaded);
-    data.translation_json_mode=[true,'true'].includes(data.translation_json_mode);
-    state.settings=await api('/api/settings',json('PUT',data));
-    if(generation===(state.settingsGeneration||0))state.settingsDirty=false;
+    state.settings=await api('/api/settings',json('PUT',settingsDraft()));
+    if(generation===(state.settingsGeneration||0)){
+      state.settingsDirty=false;
+      e.target.elements.translation_api_key.value='';
+      e.target.elements.translation_api_url.value=state.settings.translation_api_url;
+      $('#clear-translation-api-key').checked=false;
+    }
     await diagnostics();await refreshBackendStatus();toast(tr('设置已保存，下次任务生效'));
   }catch(error){$('#settings-error').textContent=error.message;}
   finally{state.settingsSaving=false;$('#save-settings').disabled=false;updateSettingsDraft();}

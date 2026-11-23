@@ -137,6 +137,138 @@ def test_bilibili_settings_roundtrip_keeps_local_fallback(tmp_path, monkeypatch)
         assert client.get('/api/diagnostics').json()['local_only'] is True
 
 
+def test_local_translation_catalog_finds_nested_models_and_first_shards(tmp_path, monkeypatch):
+    models = tmp_path / 'models'
+    nested = models / 'downloaded'
+    nested.mkdir(parents=True)
+    for path in [models / 'New.GGUF', nested / 'Fine-00001-of-00002.gguf',
+                 nested / 'Fine-00002-of-00002.gguf', models / 'Incomplete.gguf.partial']:
+        path.touch()
+    (models / 'folder.gguf').mkdir()
+    app = create_app(tmp_path / 'projects')
+    monkeypatch.setattr('app.server.ROOT', tmp_path)
+    with TestClient(app) as client:
+        assert client.get('/api/model-backends/local-translation').json() == [
+            'models/downloaded/Fine-00001-of-00002.gguf', 'models/New.GGUF'
+        ]
+
+
+def test_network_translation_preserves_and_uses_key_only_for_saved_url(tmp_path, monkeypatch):
+    path = tmp_path / 'settings.json'
+    monkeypatch.setattr('app.server.SETTINGS', path)
+    monkeypatch.setattr('app.config.SETTINGS', path)
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        payload = json.loads(request.content)
+        assert payload['model'] == 'test-chat'
+        assert 'chat_template_kwargs' not in payload
+        assert payload['response_format'] == {'type': 'json_object'}
+        return httpx.Response(200, json={'choices': [{'message': {'content':
+            '{"translations":[{"id":1,"translation":"你好。"}]}'}}]})
+
+    mock_async(monkeypatch, handler)
+    config = dict(translation_provider='openai_remote', translation_api_url='https://example.com/v1/chat/completions',
+                  translation_name='test-chat', translation_review='off', translation_compact=False,
+                  translation_remote_batch=100)
+    key = 'synthetic-api-key'
+    with TestClient(create_app(tmp_path / 'projects')) as client:
+        resp = client.put('/api/settings', json={**config, 'translation_api_key': key})
+        assert resp.status_code == 200 and key not in resp.text
+        assert resp.json()['translation_api_key_configured'] is True
+        assert resp.json()['translation_api_url'] == 'https://example.com/v1'
+        assert client.get('/api/settings').json()['translation_remote_batch'] == 100
+        invalid = client.put('/api/settings', json={**config, 'translation_api_url': 'http://example.com',
+                                                     'translation_api_key': key})
+        assert invalid.status_code == 422 and key not in invalid.text
+        assert client.put('/api/settings', json=config).json()['translation_api_key_configured']
+        assert client.put('/api/tts-session/retention', json={'tts_idle_minutes': 0,
+            'tts_keep_loaded': False}).json()['settings']['translation_api_key_configured']
+        assert not path.read_bytes().startswith(b'\xef\xbb\xbf')
+        assert client.get('/api/diagnostics').json()['local_only'] is False
+
+        for override in ({}, {'translation_api_url': 'https://another.example/v1'}):
+            response = client.post('/api/model-backends/check', json={'stage': 'translation', 'settings': {**config, **override}})
+            assert response.json()['ok'] is True
+
+        from app.config import load_settings
+        from app.project_experience import effective_asr
+        from app.translation import log_network_batch
+        settings = effective_asr(load_settings(), {'asr_options': {'asr_device': 'cpu'}})
+        rows = [dict(id=1, start=0, end=10, text='Hello.', zh='', speaker='speaker_1')]
+        logs = []
+        with log_network_batch(settings, [1], logs.append):
+            translated = run_workflow(settings.translation_service_url, settings, rows, [], 'course', threading.Event())
+        assert translated[1]['zh'] == '你好。'
+        assert len(logs) == 1 and '字幕翻译 1 次' in logs[0] and key not in logs[0]
+        assert [request.headers.get('authorization') for request in seen] == ['Bearer ' + key, None, 'Bearer ' + key]
+        assert [str(request.url) for request in seen] == [
+            'https://example.com/v1/chat/completions', 'https://another.example/v1/chat/completions',
+            'https://example.com/v1/chat/completions',
+        ]
+        assert not client.put('/api/settings', json={**config, 'translation_api_key': ''}).json()['translation_api_key_configured']
+
+
+def test_siliconflow_deepseek_translation_disables_thinking_only_on_known_route():
+    remote = Settings(translation_provider='openai_remote', translation_api_url='https://api.siliconflow.cn/v1',
+                      translation_name='deepseek-ai/DeepSeek-V3.2')
+    assert chat_payload(remote, {'chat_template_kwargs': {}}) == {'enable_thinking': False}
+    assert chat_payload(remote.model_copy(update={'translation_api_url': 'https://another.example/v1'}), {}) == {}
+    assert chat_payload(remote.model_copy(update={'translation_name': 'another-chat-model'}), {}) == {}
+
+
+def test_network_request_trace_displays_partial_stream_and_masks_credentials(monkeypatch):
+    from app.translation import _post_cancellable
+    from app.translation_requests import TranslationRequests, request_scope
+
+    history = TranslationRequests()
+    key = 'synthetic-stream-key'
+    first_read = asyncio.Event()
+    continue_stream = asyncio.Event()
+
+    def event(choice):
+        return ('data: '+json.dumps({'choices':[choice]})+'\n\n').encode()
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield event({'delta':{'reasoning_content':'Provider reasoning'},'index':0})
+            yield event({'delta':{'content':'Partial '},'index':0})
+            first_read.set()
+            await continue_stream.wait()
+            yield event({'delta':{'content':'subtitle'},'index':0,'finish_reason':'stop'})
+            yield b'data: [DONE]\n\n'
+
+    def handler(request):
+        assert request.headers['authorization'] == 'Bearer '+key
+        assert json.loads(request.content)['stream'] is True
+        return httpx.Response(200,headers={'Content-Type':'text/event-stream'},stream=Body())
+
+    mock_async(monkeypatch, handler)
+
+    async def check():
+        token = request_scope.set((history,'project','run',True))
+        try:
+            request = asyncio.create_task(_post_cancellable('https://example.com/v1/chat/completions',
+                {'model':'fixture','stream':False,'messages':[{'role':'user','content':'Source '+key}]},
+                threading.Event(),network=True,api_key=key,phase='段落翻译'))
+            try:
+                await asyncio.wait_for(first_read.wait(), 2)
+                partial = history.snapshot('project','run')['selected']
+                assert partial['content'] == 'Partial ' and partial['finished'] is None
+                assert 'reasoning_content' in partial['response'] and partial['first_response'] is not None
+                assert key not in partial['request'] and json.loads(partial['request'])['stream']
+                assert history.snapshot('another-project','run')['selected'] is None
+            finally:
+                continue_stream.set()
+            response = await asyncio.wait_for(request, 2)
+            assert response.json()['choices'][0]['message']['content'] == 'Partial subtitle'
+            assert history.snapshot('project','run')['selected']['finished'] is not None
+        finally:
+            request_scope.reset(token)
+
+    asyncio.run(check())
+
 def test_model_identity_and_capability_gate(tmp_path):
     settings=service();row=dict(id=1,zh='Hello',speaker='speaker_1')
     def clip(config,**extra):
