@@ -58,6 +58,7 @@ jobs:
           node --check app/static/source-audio.js
           node --check app/static/diarization.js
           node tests/check_i18n.cjs
+          node tests/check_workbench_layout.cjs
           node tests/check_progress_ui.cjs
           node --check app/static/workflow-core.js
           node --check app/static/workflow.js

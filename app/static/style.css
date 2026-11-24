@@ -303,3 +303,13 @@ body.subtitle-workbench main{max-width:none}.subtitle-review-toolbar{position:st
 #translation-request-picker{width:100%}
 
 .retranslated-subtitle{margin-bottom:8px;padding:8px 10px;border-inline-start:3px solid var(--accent);background:var(--soft);overflow-wrap:anywhere}.retranslated-subtitle b{font-size:11px;color:var(--muted)}.retranslated-subtitle p{margin:3px 0 0;color:var(--ink);white-space:pre-wrap}
+
+.table-pagination{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:6px;margin:0;padding:8px 0;font-size:12px}
+.table-pagination-top{margin-top:4px;scroll-margin-top:12px}
+.table-pagination-bottom{padding-bottom:0}
+.table-pagination button,.table-page-number input{min-height:34px;padding:4px 8px;font-size:12px}
+.table-page-number{display:flex;align-items:center;gap:5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.table-page-number input{width:62px;margin:0;text-align:center}
+/* The dubbing board pages are much taller than the viewport, so keep its pager
+   pinned while the reader scrolls rows; both the top and bottom pager stay usable. */
+.dubbing-board .table-pagination-top{position:sticky;top:0;z-index:6;background:#fff;padding-block:10px;border-bottom:1px solid var(--line)}

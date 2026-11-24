@@ -1,0 +1,229 @@
+/* Compact workbench layout for the two table-first pages: 翻译与校对 (subtitle
+   review) and 角色与配音 (dubbing). The tables are where the work happens, so
+   page chrome is condensed and every row is sized for scanning and editing
+   instead of one row per screen. Loaded after style.css/experience.css so the
+   workbench scopes here win without touching the rest of the app. */
+
+/* ---------- structure that also exists on small screens ---------- */
+#voice-table-body .source-line{margin:3px 0 0;font-size:11px;line-height:1.45;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.table-page-summary{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.table-pager-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.bulk-field{display:flex;align-items:center;min-width:0}
+.bulk-divider{width:1px;align-self:stretch;min-height:22px;background:var(--line);margin:0 2px}
+.dubbing-board .board-pagination{justify-content:center}
+
+/* The dubbing controls stay on one wrapping line at every width. */
+body.dubbing-workbench .board-filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+body.dubbing-workbench .board-filters label{display:flex;align-items:center;gap:5px;margin:0;font-size:11px;min-width:0;white-space:nowrap}
+body.dubbing-workbench .board-filters label.filter-search{flex:1 1 100%}
+body.dubbing-workbench .board-filters input,
+body.dubbing-workbench .board-filters select{min-height:30px;font-size:12px;padding:4px 7px;margin:0}
+body.dubbing-workbench .board-filters .filter-search input{flex:1;min-width:0}
+body.dubbing-workbench .bulk-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+body.dubbing-workbench .bulk-tools .bulk-field{display:flex;align-items:center;gap:4px;min-width:0}
+body.dubbing-workbench .bulk-tools .bulk-label{font-size:10px;color:var(--muted);white-space:nowrap}
+body.dubbing-workbench .bulk-tools select{min-height:28px;font-size:11px;padding:3px 6px;margin:0;max-width:150px}
+body.dubbing-workbench .bulk-tools button{min-height:28px;padding:3px 9px;font-size:11px}
+body.dubbing-workbench .bulk-tools .bulk-divider{display:none}
+@media(max-width:950px){
+  body.dubbing-workbench .bulk-tools{padding:8px 10px}
+  body.dubbing-workbench .bulk-tools .bulk-field{flex:0 1 auto}
+  body.dubbing-workbench .table-page-summary{flex-basis:100%;text-align:center}
+}
+
+@media (min-width:951px){
+  /* ---------- shared project header on both workbenches ---------- */
+  body.subtitle-workbench main,
+  body.dubbing-workbench main{max-width:none;padding-inline:24px}
+  body.subtitle-workbench .topbar,
+  body.dubbing-workbench .topbar{height:52px}
+  body.subtitle-workbench .project-backbar,
+  body.dubbing-workbench .project-backbar{padding-block:0;min-height:24px;margin-bottom:2px}
+  body.subtitle-workbench .project-backbar button,
+  body.dubbing-workbench .project-backbar button{min-height:24px;padding:2px 6px;font-size:11px}
+  body.subtitle-workbench .project-heading,
+  body.dubbing-workbench .project-heading{padding:2px 0 4px;gap:12px;align-items:center;margin-bottom:8px}
+  body.subtitle-workbench .project-heading>div:first-child,
+  body.dubbing-workbench .project-heading>div:first-child{display:flex;align-items:baseline;gap:2px 12px;flex-wrap:wrap;min-width:0}
+  body.subtitle-workbench #project-title,
+  body.dubbing-workbench #project-title{font-size:22px;line-height:1.25;margin:0}
+  body.subtitle-workbench #project-overview,
+  body.dubbing-workbench #project-overview{margin:0;font-size:11px}
+  body.subtitle-workbench #project-meta,
+  body.dubbing-workbench #project-meta{display:none}
+  body.subtitle-workbench .heading-actions,
+  body.dubbing-workbench .heading-actions{gap:6px}
+  body.subtitle-workbench .heading-actions button,
+  body.dubbing-workbench .heading-actions button{min-height:32px;padding:5px 12px;font-size:12px}
+  body.subtitle-workbench .project-goal-controls,
+  body.dubbing-workbench .project-goal-controls{margin-top:4px;gap:6px 10px}
+  body.subtitle-workbench .project-goal-controls>label,
+  body.dubbing-workbench .project-goal-controls>label{font-size:11px}
+  body.subtitle-workbench .project-goal-controls select,
+  body.dubbing-workbench .project-goal-controls select{min-height:28px;padding:3px 7px;font-size:11px;margin:0}
+  body.subtitle-workbench .project-goal-controls button,
+  body.dubbing-workbench .project-goal-controls button{min-height:28px;padding:3px 8px;font-size:11px}
+
+  body.subtitle-workbench #project-detailed-progress,
+  body.dubbing-workbench #project-detailed-progress{margin:1px 0 4px}
+  body.subtitle-workbench #project-detailed-progress .task-progress-card,
+  body.dubbing-workbench #project-detailed-progress .task-progress-card{display:flex;align-items:center;flex-wrap:wrap;gap:4px 14px;margin:0;padding:5px 12px;min-height:0}
+  body.subtitle-workbench .task-inline-heading,
+  body.dubbing-workbench .task-inline-heading{margin:0;gap:4px 10px;font-size:11px}
+  body.subtitle-workbench .task-inline-note,
+  body.dubbing-workbench .task-inline-note{margin:0;font-size:11px}
+
+  body.subtitle-workbench .tabs,
+  body.dubbing-workbench .tabs,
+  body.subtitle-workbench #workspace>.tabs,
+  body.dubbing-workbench #workspace>.tabs{margin:6px 0 8px;gap:6px}
+  body.subtitle-workbench .tabs .tab,
+  body.dubbing-workbench .tabs .tab{height:auto;min-height:38px;padding:4px 10px;gap:8px}
+  body.subtitle-workbench .tabs .tab .step-index,
+  body.dubbing-workbench .tabs .tab .step-index{width:24px;height:24px;font-size:12px}
+  body.subtitle-workbench .tabs .tab small,
+  body.dubbing-workbench .tabs .tab small{font-size:10px;line-height:1.3}
+
+  /* A title and its one-line summary sit on the same row instead of stacking. */
+  body.subtitle-workbench #panel-subtitles>.section-toolbar>div:first-child,
+  body.dubbing-workbench #panel-voices>.section-toolbar>div:first-child,
+  body.dubbing-workbench .dubbing-board>.section-toolbar>div:first-child,
+  body.dubbing-workbench .session-toolbar>div:first-child,
+  body.dubbing-workbench #alignment-summary>div,
+  body.subtitle-workbench #translation-review>div{display:flex;align-items:baseline;gap:4px 10px;flex-wrap:wrap;min-width:0}
+  body.subtitle-workbench #panel-subtitles>.section-toolbar p,
+  body.dubbing-workbench #panel-voices>.section-toolbar p,
+  body.dubbing-workbench .dubbing-board>.section-toolbar p,
+  body.dubbing-workbench .session-toolbar p,
+  body.dubbing-workbench #alignment-summary p,
+  body.subtitle-workbench #translation-review p{margin:0;font-size:11px}
+
+  /* ================= 翻译与校对 ================= */
+  body.subtitle-workbench #subtitle-language-details summary{padding-block:3px;font-size:11px}
+  body.subtitle-workbench #panel-subtitles>.section-toolbar{padding:2px 0;margin:4px 0 6px;gap:10px}
+  body.subtitle-workbench #panel-subtitles>.section-toolbar h2{font-size:17px;margin:0}
+  body.subtitle-workbench #panel-subtitles>.section-toolbar button{min-height:30px;padding:4px 10px;font-size:12px}
+  body.subtitle-workbench #translation-review{align-items:center;padding:6px 12px;margin:6px 0 0;font-size:12px}
+  body.subtitle-workbench #translation-review button{min-height:30px;padding:4px 10px;font-size:11px;flex:0 0 auto}
+
+  body.subtitle-workbench .subtitle-board{padding:10px 12px}
+  body.subtitle-workbench .subtitle-export-bar{padding:0 0 6px;gap:4px 10px}
+  body.subtitle-workbench .subtitle-export-bar button{min-height:30px;padding:4px 8px;font-size:11px}
+  body.subtitle-workbench .subtitle-edit-tools{gap:4px 10px;font-size:11px}
+  body.subtitle-workbench .subtitle-edit-tools button{min-height:28px;padding:3px 8px;font-size:11px}
+  body.subtitle-workbench .review-filters{margin:2px 0 0;gap:4px 8px;flex-wrap:wrap}
+  body.subtitle-workbench .review-filters label{font-size:11px;gap:6px}
+  body.subtitle-workbench .review-filters input,
+  body.subtitle-workbench .review-filters select{min-height:30px;font-size:11px;padding:4px 6px;margin:0}
+  body.subtitle-workbench .editor-help{font-size:11px}
+  body.subtitle-workbench .subtitle-review-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:4px 8px;margin:4px 0 0}
+  body.subtitle-workbench .subtitle-review-toolbar button{min-height:28px;padding:3px 8px;font-size:11px}
+  body.subtitle-workbench .subtitle-review-toolbar select{min-height:28px;font-size:11px;padding:3px 6px;margin:0}
+  body.subtitle-workbench .subtitle-review-toolbar label{font-size:11px;margin:0;gap:4px}
+  body.subtitle-workbench .subtitle-board .table-pagination{padding:3px 0;font-size:11px}
+  body.subtitle-workbench .subtitle-board .table-pagination button,
+  body.subtitle-workbench .subtitle-board .table-page-number input{min-height:28px;font-size:11px;padding:3px 7px}
+  body.subtitle-workbench .subtitle-board .table-page-number input{width:52px}
+
+  body.subtitle-workbench .review-table th{padding:6px 8px;font-size:11px}
+  body.subtitle-workbench .review-table th:nth-child(2){width:148px}
+  body.subtitle-workbench .review-table th:last-child{width:124px}
+  body.subtitle-workbench .review-table td{padding:5px 8px}
+  body.subtitle-workbench .review-cue{display:flex;flex-wrap:wrap;align-content:flex-start;align-items:center;gap:0 6px}
+  body.subtitle-workbench .review-cue b{font-size:11px;white-space:nowrap}
+  body.subtitle-workbench .review-cue small{display:inline;margin:0;font-size:10px;line-height:1.5;white-space:nowrap}
+  body.subtitle-workbench .review-cue .badge{margin:1px 0 0;padding:1px 5px;font-size:9px;line-height:1.45}
+  body.subtitle-workbench .review-table textarea{min-height:40px!important;padding:5px 7px;font-size:13px;line-height:1.45}
+  body.subtitle-workbench .review-table td:last-child{display:flex;flex-wrap:wrap;align-items:flex-start;gap:3px;align-content:flex-start}
+  body.subtitle-workbench .review-table td:last-child button{width:auto;margin:0;min-height:26px;padding:2px 7px;font-size:11px;flex:0 0 auto}
+  body.subtitle-workbench .review-table td:last-child .cue-more{margin:0;display:inline-flex;min-height:26px;align-items:center}
+  body.subtitle-workbench .review-table td:last-child .cue-more summary{font-size:11px;padding:2px 4px}
+  body.subtitle-workbench.comfortable-subtitles .review-table textarea{min-height:64px!important}
+
+  /* ================= 角色与配音 ================= */
+  body.dubbing-workbench #panel-voices>.section-toolbar{padding:2px 0;margin:4px 0 6px;gap:8px}
+  body.dubbing-workbench #panel-voices>.section-toolbar h2{font-size:18px;margin:0}
+  body.dubbing-workbench #panel-voices>.section-toolbar button{min-height:30px;padding:4px 10px;font-size:12px}
+
+  /* 模型 / 角色音色 / 对齐状态 collapse into one three-up strip. */
+  body.dubbing-workbench .voice-setup{display:flex;gap:8px;align-items:stretch;margin-bottom:8px}
+  body.dubbing-workbench .voice-setup>*{flex:1 1 0;min-width:0;margin:0!important}
+  body.dubbing-workbench .voice-setup .session-toolbar,
+  body.dubbing-workbench .voice-setup #voice-references,
+  body.dubbing-workbench .voice-setup #alignment-summary{padding:6px 10px;justify-content:space-between;gap:8px}
+  body.dubbing-workbench .voice-setup .session-toolbar{padding:8px 12px}
+  body.dubbing-workbench .voice-setup .session-toolbar b{font-size:12px}
+  body.dubbing-workbench .voice-setup .tts-control-actions{gap:6px}
+  body.dubbing-workbench .voice-setup .tts-control-actions button{min-height:28px;padding:3px 8px;font-size:11px}
+  body.dubbing-workbench .voice-setup #voice-references>summary{font-size:12px;padding:0}
+  body.dubbing-workbench .voice-setup #alignment-summary{border-radius:10px}
+  body.dubbing-workbench .voice-setup #alignment-summary b{font-size:12px}
+  body.dubbing-workbench .voice-setup #alignment-summary label{font-size:11px}
+  body.dubbing-workbench #alignment-summary[hidden]{display:none}
+
+  body.dubbing-workbench .dubbing-board{padding:12px;margin-bottom:12px}
+  body.dubbing-workbench .dubbing-board>.section-toolbar{margin-bottom:6px;align-items:center;gap:12px}
+  body.dubbing-workbench .dubbing-board>.section-toolbar h3{font-size:16px;margin:0}
+  body.dubbing-workbench .dubbing-board>.section-toolbar .button-group{gap:6px}
+  body.dubbing-workbench .dubbing-board>.section-toolbar .button-group button{min-height:30px;padding:4px 9px;font-size:11px}
+
+  body.dubbing-workbench .board-filters{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin-bottom:6px}
+  body.dubbing-workbench .board-filters label{margin:0;display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;min-width:0}
+  body.dubbing-workbench .board-filters label.filter-search{flex:1;min-width:220px}
+  body.dubbing-workbench .board-filters input,
+  body.dubbing-workbench .board-filters select{min-height:30px;font-size:12px;padding:4px 7px;margin:0}
+  body.dubbing-workbench .board-filters .filter-search input{flex:1;min-width:0}
+
+  body.dubbing-workbench .bulk-tools{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;padding:6px 10px;margin-bottom:6px}
+  body.dubbing-workbench .bulk-tools .check-label{font-size:11px;gap:5px;margin:0}
+  body.dubbing-workbench .bulk-tools .subtle{font-size:11px}
+  body.dubbing-workbench .bulk-tools .bulk-label{font-size:10px;color:var(--muted);margin-right:-2px}
+  body.dubbing-workbench .bulk-tools select{min-height:28px;font-size:11px;padding:3px 6px;margin:0;max-width:150px;width:auto}
+  body.dubbing-workbench .bulk-tools .bulk-field{flex:0 1 auto;width:auto;max-width:none}
+  body.dubbing-workbench .bulk-tools button{min-height:28px;padding:3px 9px;font-size:11px}
+  body.dubbing-workbench .bulk-tools .text-button{min-height:26px;padding:2px 6px}
+  body.dubbing-workbench .bulk-tools #apply-voice-batch{width:auto;min-height:28px;padding:3px 9px;font-size:11px}
+
+  body.dubbing-workbench .table-pagination-top{padding:4px 0;gap:6px 12px;justify-content:space-between;font-size:11px}
+  body.dubbing-workbench .table-pagination-top button,
+  body.dubbing-workbench .table-pagination-bottom button,
+  body.dubbing-workbench .table-page-number input{min-height:28px;font-size:11px;padding:3px 7px}
+  body.dubbing-workbench .table-page-number input{width:52px}
+  body.dubbing-workbench .table-pagination-bottom{padding:4px 0}
+  body.dubbing-workbench .board-pagination{margin-top:8px}
+
+  body.dubbing-workbench .voice-table thead{position:sticky;top:var(--voice-pager-height,37px);z-index:5}
+  body.dubbing-workbench .voice-table th{padding:6px 8px;font-size:11px;background:#f3f7f4}
+  body.dubbing-workbench .voice-table td{padding:4px 8px;vertical-align:top}
+  body.dubbing-workbench .voice-col-cue{width:104px}
+  body.dubbing-workbench .voice-col-speaker{width:clamp(116px,9cqi,142px)}
+  body.dubbing-workbench .voice-col-emotion{width:clamp(132px,10cqi,156px)}
+  body.dubbing-workbench .voice-col-strength{width:clamp(88px,7cqi,102px)}
+  body.dubbing-workbench .voice-col-action{width:clamp(100px,7cqi,116px)}
+  body.dubbing-workbench .voice-table .cue-cell b{font-size:12px;line-height:1.3}
+  body.dubbing-workbench .voice-table .cue-cell small{display:block;margin-top:2px;font-size:10px;line-height:1.3;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+  body.dubbing-workbench .voice-table textarea{min-height:40px!important;padding:5px 7px;font-size:13px;line-height:1.45}
+  body.dubbing-workbench .voice-table select{min-height:30px;padding:3px 6px;font-size:11px}
+  body.dubbing-workbench .voice-table .role-cell select{max-width:100%}
+  body.dubbing-workbench .voice-table .translation-check summary{font-size:10px;margin-top:3px}
+  body.dubbing-workbench .voice-table .action-cell button{width:100%;min-height:30px;padding:3px 6px;font-size:11px}
+  body.dubbing-workbench.comfortable-voices .voice-table textarea{min-height:64px!important}
+}
+
+/* Wider screens can afford roomier meta columns; narrower desktops keep the
+   table from squeezing the editable text columns. */
+@media (min-width:1200px){
+  body.subtitle-workbench .review-table th:nth-child(2){width:200px}
+  body.subtitle-workbench .review-table th:last-child{width:156px}
+}
+
+/* Below the table's container breakpoint the dubbing rows become grid cards;
+   stack them tighter as well so the compact feel survives on small laptops. */
+@container dubbing-list (max-width:1050px){
+  body.dubbing-workbench .voice-table thead tr{padding:6px 10px}
+  body.dubbing-workbench .voice-table tbody tr{padding:7px 10px;row-gap:6px;column-gap:10px}
+  body.dubbing-workbench .voice-table textarea{min-height:38px!important;padding:4px 6px;font-size:12px;line-height:1.4}
+  body.dubbing-workbench .voice-table select{min-height:28px;font-size:11px}
+  body.dubbing-workbench .voice-table .source-line{font-size:10px}
+  body.dubbing-workbench .voice-table .action-cell button{min-height:28px;font-size:11px}
+}

@@ -2,6 +2,50 @@
 function fixedServiceVoice(){return state.modelBackendSettings?.tts_provider==='openai_speech';}
 Object.assign(state,{section:'projects',voices:[],voiceChecked:new Set(),voicePage:0,libraryRequest:0,logKind:'activity',logLines:500});
 
+function setupTablePagination(selector,pageKey,renderTable,stickyAboveSelector){
+  const pagers=$$(selector),top=pagers[0];
+  function scrollToTableStart(){
+    const table=top.nextElementSibling;if(!table)return;
+    const offset=stickyAboveSelector?($(stickyAboveSelector)?.offsetHeight||0):0;
+    window.scrollTo({top:Math.max(0,table.getBoundingClientRect().top+window.scrollY-top.offsetHeight-offset),behavior:'instant'});
+  }
+  function navigate(page,pager,step){
+    const stuck=top.getBoundingClientRect().top<=0;
+    state[pageKey]=page;
+    renderTable(true);
+    const focus=step&&top.querySelector(`[data-page-step="${step}"]:enabled`)||top.elements.page;
+    focus.focus({preventScroll:true});
+    if(pager!==top||stuck)scrollToTableStart();
+  }
+  for(const pager of pagers){
+    const input=pager.elements.page;
+    pager.onsubmit=event=>{
+      event.preventDefault();
+      const page=input.valueAsNumber;
+      if(Number.isInteger(page)&&page>=1&&page<=Number(input.max))navigate(page-1,pager);
+    };
+    for(const button of pager.querySelectorAll('[data-page-step]')){
+      button.onclick=()=>navigate(state[pageKey]+Number(button.dataset.pageStep),pager,button.dataset.pageStep);
+    }
+    input.onfocus=()=>input.select();
+  }
+  return function renderPagers(pages,force){
+    const current=state[pageKey],page=String(current+1),total=String(pages);
+    for(const pager of pagers){
+      const input=pager.elements.page;
+      if(force||pager.dataset.page!==page||input.max!==total||!pager.contains(document.activeElement))input.value=page;
+      pager.dataset.page=page;
+      input.max=total;
+      input.disabled=pager.querySelector('[type="submit"]').disabled=pages===1;
+      pager.querySelector('[data-page-total]').textContent=total;
+      pager.querySelector('[data-page-step="-1"]').disabled=current===0;
+      pager.querySelector('[data-page-step="1"]').disabled=current===pages-1;
+    }
+  };
+}
+const renderSubtitlePagers=setupTablePagination('[data-subtitle-pager]','listPage',force=>renderSentenceList(force),'#panel-subtitles>.section-toolbar');
+const renderVoicePagers=setupTablePagination('[data-voice-pager]','voicePage',renderVoiceBoard);
+
 function showSection(section){
   const view=section==='projects'&&state.projectDetail&&state.project?'project:'+state.id:section;
   const changed=state.viewKey!==view;
@@ -173,11 +217,12 @@ function renderVoiceBoard(force=false){
   const measured=new Set(canShorten?(alignment.conflicts||[]).filter(item=>{const capacity=item.max_voice_seconds??item.window_seconds;const target=item.reason==='neighbour'?Math.min(capacity,item.window_seconds):capacity;return target>0&&item.voice_seconds>target;}).map(item=>item.id):[]);
   const key=JSON.stringify([state.id,visible,speakerKey,state.project.translation_checks,state.voicePage,size,[...state.voiceChecked],busy,[...measured],I18N.locale()]);
   if(key!==state.boardKey){state.boardKey=key;
-    $('#voice-table-body').innerHTML=visible.map(({row:r,index:i})=>`<tr class="${i===state.selected?'current':''}"><td><input type="checkbox" data-board-check="${r.id}" aria-label="${esc(tr('选择第 {0} 句',r.id))}" ${state.voiceChecked.has(r.id)?'checked':''}></td><td class="cue-cell"><b>${r.id}</b><small>${clock(r.start)}–${clock(r.end)}</small></td><td class="script-cell"><textarea dir="auto" rows="2" data-board-field="zh" data-index="${i}" aria-label="${esc(tr('第 {0} 句译文',r.id))}">${esc(r.zh)}</textarea><details><summary>${esc(tr('原文'))}</summary><p dir="auto">${esc(r.text)}</p></details>${translationCheckMarkup(r)}${measured.has(r.id)&&r.zh.trim()?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="shorten" ${busy?'disabled':''}>${esc(tr('按实测时长生成短稿'))}</button>`:''}${state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&state.project.retranslation.mode&&state.project.retranslation.mode!=='translate'?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="${esc(state.project.retranslation.mode)}">${esc(tr('查看本句校对建议'))}</button>`:''}</td><td data-label="${esc(tr('角色'))}" class="role-cell"><select data-board-field="speaker" data-index="${i}" aria-label="${esc(tr('第 {0} 句角色',r.id))}" title="${esc(roleOptionText(r.speaker))}">${roleOptions(speakers,r.speaker,true)}</select><small class="role-voice-caption" title="${esc(roleVoiceName(r.speaker))}">${esc(tr('音色：{0}',roleVoiceName(r.speaker)))}</small></td><td data-label="${esc(tr('表达情绪'))}"><select data-board-field="emotion" data-index="${i}" aria-label="${esc(tr('第 {0} 句情绪',r.id))}">${emotionOptions(r.emotion||'inherit')}</select></td><td data-label="${esc(tr('情绪强度'))}"><select data-board-field="emotion_strength" data-index="${i}" aria-label="${esc(tr('第 {0} 句强度',r.id))}">${strengthOptions(r.emotion_strength||'medium')}</select></td><td><button data-board-detail="${i}">${esc(tr('细调 / 试听'))}</button></td></tr>`).join('')||`<tr><td colspan="7" class="empty-inline">${esc(tr('没有匹配的句子'))}</td></tr>`;
+    $('#voice-table-body').innerHTML=visible.map(({row:r,index:i})=>`<tr class="${i===state.selected?'current':''}"><td><input type="checkbox" data-board-check="${r.id}" aria-label="${esc(tr('选择第 {0} 句',r.id))}" ${state.voiceChecked.has(r.id)?'checked':''}></td><td class="cue-cell"><b>${r.id}</b><small>${clock(r.start)}–${clock(r.end)}</small><small>${esc(tr('时长 {0} 秒',Number((r.end-r.start).toFixed(2))))}</small></td><td class="script-cell"><textarea dir="auto" rows="1" data-board-field="zh" data-index="${i}" aria-label="${esc(tr('第 {0} 句译文',r.id))}">${esc(r.zh)}</textarea><p class="source-line" dir="auto" title="${esc(r.text)}">${esc(r.text)}</p>${translationCheckMarkup(r)}${measured.has(r.id)&&r.zh.trim()?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="shorten" ${busy?'disabled':''}>${esc(tr('按实测时长生成短稿'))}</button>`:''}${state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&state.project.retranslation.mode&&state.project.retranslation.mode!=='translate'?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="${esc(state.project.retranslation.mode)}">${esc(tr('查看本句校对建议'))}</button>`:''}</td><td data-label="${esc(tr('角色'))}" class="role-cell"><select data-board-field="speaker" data-index="${i}" aria-label="${esc(tr('第 {0} 句角色',r.id))}" title="${esc(roleOptionText(r.speaker))}">${roleOptions(speakers,r.speaker,true)}</select></td><td data-label="${esc(tr('表达情绪'))}"><select data-board-field="emotion" data-index="${i}" aria-label="${esc(tr('第 {0} 句情绪',r.id))}">${emotionOptions(r.emotion||'inherit')}</select></td><td data-label="${esc(tr('情绪强度'))}"><select data-board-field="emotion_strength" data-index="${i}" aria-label="${esc(tr('第 {0} 句强度',r.id))}">${strengthOptions(r.emotion_strength||'medium')}</select></td><td class="action-cell"><button data-board-detail="${i}">${esc(tr('细调 / 试听'))}</button></td></tr>`).join('')||`<tr><td colspan="7" class="empty-inline">${esc(tr('没有匹配的句子'))}</td></tr>`;
   }
   $$('#voice-table-body textarea').forEach(growTextarea);
   $('#voice-table-count').textContent=tr('共 {0} 句 · 本页显示 {1} 句',items.length,visible.length);
-  $('#voice-page-label').textContent=`${state.voicePage+1} / ${pages}`;$('#voice-page-prev').disabled=!state.voicePage;$('#voice-page-next').disabled=state.voicePage>=pages-1;updateBoardControls();
+  renderVoicePagers(pages,force);
+  updateBoardControls();
 }
 function setRowExpression(row,emotion,strength){
   if(emotion==='inherit'){delete row.emotion;delete row.emotion_strength;}
@@ -195,7 +240,7 @@ $('#voice-table-body').oninput=e=>{
     const speaker=newProjectSpeaker(),option=document.createElement('option');option.value=speaker;option.textContent=roleName(speaker);el.insertBefore(option,el.lastElementChild);el.value=speaker;
   }
   if(field==='emotion')setRowExpression(row,el.value,'');else if(field==='emotion_strength')setRowExpression(row,'',el.value);else row[field]=el.value;
-  if(field==='speaker'){el.title=roleOptionText(row.speaker);const caption=el.parentElement.querySelector('.role-voice-caption');caption.textContent=tr('音色：{0}',roleVoiceName(row.speaker));caption.title=roleVoiceName(row.speaker);}
+  if(field==='speaker')el.title=roleOptionText(row.speaker);
   if(el.tagName==='TEXTAREA')growTextarea(el);setDirty(true);state.boardKey=null;updateBoardControls();
 };
 $('#voice-table-body').onchange=e=>{
@@ -217,7 +262,7 @@ $('#follow-source-all').onclick=()=>{
   if(changed)renderVoiceBatchChange(changed);
 };
 for(const id of ['voice-row-search','voice-speaker-filter','voice-page-size'])$('#'+id).addEventListener(id==='voice-row-search'?'input':'change',()=>{state.voicePage=0;state.boardKey=null;renderVoiceBoard(true);});
-$('#voice-page-prev').onclick=()=>{state.voicePage--;renderVoiceBoard();};$('#voice-page-next').onclick=()=>{state.voicePage++;renderVoiceBoard();};
+$('#voice-density').onchange=e=>{document.body.classList.toggle('comfortable-voices',e.target.value==='comfortable');state.boardKey=null;renderVoiceBoard(true);};
 $('#voice-check-page').onchange=e=>{const size=Number($('#voice-page-size').value);boardRows().slice(state.voicePage*size,(state.voicePage+1)*size).forEach(({row})=>e.target.checked?state.voiceChecked.add(row.id):state.voiceChecked.delete(row.id));state.boardKey=null;renderVoiceBoard();};
 $('#voice-clear-selection').onclick=()=>{state.voiceChecked.clear();state.boardKey=null;renderVoiceBoard();};
 $('#apply-voice-batch').onclick=()=>guard(async()=>{
@@ -423,23 +468,30 @@ function translationCheckText(check){
 function translationCheckMarkup(row){const checks=translationChecks(row);return checks.length?`<details class="translation-check"><summary>${esc(tr('译文待核对'))}</summary>${checks.map(check=>`<p>${esc(translationCheckText(check))}</p>`).join('')}<button type="button" class="text-button" data-source-audio="${row.id}" aria-label="${esc(tr('听第 {0} 句原声',row.id))}">${esc(tr('听这一段原声'))}</button></details>`:'';}
 
 // Subtitle review: simultaneous source/translation editing with document scrolling.
-filteredRows=function(){const query=$('#segment-search').value.trim().toLowerCase(),filter=$('#subtitle-filter').value;
+function filteredRows(){const query=$('#segment-search').value.trim().toLowerCase(),filter=$('#subtitle-filter').value;
   return state.rows.map((r,i)=>({r,i})).filter(({r})=>(!query||`${r.id} ${r.text} ${r.zh} ${proposalEditText(inlineRetranslation(r))}`.toLowerCase().includes(query))&&(filter!=='missing'||!r.zh.trim())&&(filter!=='translated'||!!r.zh.trim())&&(filter!=='checks'||translationChecks(r).length>0)&&(window.SubtitleTools?.matches(r,filter)??true));
-};
-renderSentenceList=function(force=false){
+}
+
+function renderSentenceList(force=false){
   if(state.subtitleProject!==state.id){state.subtitleProject=state.id;state.listPage=0;state.subtitleKey=null;$('#subtitle-filter').value='all';}
   const items=filteredRows(),size=Number($('#subtitle-page-size').value),pages=Math.max(1,Math.ceil(items.length/size));state.listPage=Math.min(state.listPage,pages-1);
   const visible=items.slice(state.listPage*size,(state.listPage+1)*size),busy=active(state.project)||state.saving;
-  $('#list-count').textContent=tr('{0} 句',items.length);$('#segments-page').textContent=`${state.listPage+1} / ${pages}`;
-  $('#segments-prev').disabled=!state.listPage;$('#segments-next').disabled=state.listPage>=pages-1;
+  $('#list-count').textContent=tr('{0} 句',items.length);
+  renderSubtitlePagers(pages,force);
   if(!force&&$('#segment-list').contains(document.activeElement)&&document.activeElement.matches('textarea')){updateReviewControls();return;}
   const checksCount=state.rows.filter(row=>translationChecks(row).length).length;$('#translation-check-count').hidden=!checksCount;$('#translation-check-count').textContent=tr('待核对 {0} 句',checksCount);
   const pending=visible.map(({r})=>inlineRetranslation(r));
   const key=JSON.stringify([state.id,visible,pending.map(proposalEditText),state.proposal?.allow_edits,state.project.retranslation,state.project.translation_checks,busy,I18N.locale()]);if(key===state.subtitleKey)return;state.subtitleKey=key;
   $('#segment-list').innerHTML=visible.map(({r,i},index)=>`<tr><td class="review-cue"><b>${esc(tr('第 {0} 句',r.id))}</b><small>${clock(r.start)}–${clock(r.end)}</small><small>${esc(tr('时长 {0} 秒',Number((r.end-r.start).toFixed(2))))}</small><small>${esc(roleName(r.speaker))}</small><span class="badge">${esc(tr(pending[index]?'译文待采用':r.zh.trim()?'已翻译':'待翻译'))}</span></td><td data-label="${esc(tr('原文'))}"><textarea dir="auto" rows="1" data-review-field="text" data-index="${i}" aria-label="${esc(tr('第 {0} 句原文',r.id))}" ${busy?'disabled':''}>${esc(r.text)}</textarea></td><td data-label="${esc(tr('译文配音稿'))}">${pending[index]?`<div class="retranslated-subtitle"><b>${esc(tr('新译文'))}</b>${proposalTextMarkup(pending[index],true)}</div>`:''}<textarea dir="auto" rows="1" data-review-field="zh" data-index="${i}" aria-label="${esc(tr('第 {0} 句译文',r.id))}" ${busy?'disabled':''}>${esc(r.zh)}</textarea>${translationCheckMarkup(r)}${state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&state.project.retranslation.mode&&state.project.retranslation.mode!=='translate'?`<button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="${esc(state.project.retranslation.mode)}">${esc(tr('查看本句校对建议'))}</button>`:''}</td><td><button type="button" class="text-button" data-source-audio="${r.id}" aria-label="${esc(tr('听第 {0} 句原声',r.id))}">${esc(tr('听原声'))}</button><button data-cue-detail="${i}">${esc(tr('详情'))}</button><details class="cue-more"><summary>${esc(tr('更多'))}</summary><div><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="asr" ${busy?'disabled':''}>${esc(tr('重新识别原文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="source" ${busy?'disabled':''}>${esc(tr('润色原文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="translation" ${busy?'disabled':''}>${esc(tr('润色译文'))}</button><button type="button" class="text-button" data-retranslate="${r.id}" data-refine-mode="both" ${busy?'disabled':''}>${esc(tr('联合校对'))}</button><button data-retranslate="${r.id}" ${busy?'disabled':''}>${esc(tr(state.project.retranslation?.segment_id===r.id&&state.project.retranslation?.status==='ready'&&(!state.project.retranslation.mode||state.project.retranslation.mode==='translate')?'查看新译文':'重新翻译'))}</button><button data-cue-voice="${i}" class="text-button">${esc(tr('细调 / 试听'))}</button></div></details></td></tr>`).join('')||`<tr><td colspan="5" class="empty-inline">${esc(tr(state.rows.length?'没有匹配的句子':'先识别原文，或导入原文 SRT。字幕会显示在这里。'))}</td></tr>`;
   $$('#segment-list textarea').forEach(growTextarea);
-};
-function growTextarea(el){el.style.height='auto';el.style.height=Math.max(84,el.scrollHeight+2)+'px';}
+}
+function growTextarea(el){
+  el.style.height='auto';
+  // The workbench stylesheets decide the baseline row height; fall back to the
+  // historical 84px for textareas that do not declare one.
+  const min=parseFloat(getComputedStyle(el).minHeight)||84;
+  el.style.height=Math.round(Math.max(min,el.scrollHeight+2))+'px';
+}
 function updateReviewControls(){$$('[data-retranslate]').forEach(el=>el.disabled=active(state.project)||state.saving);$$('[data-review-field]').forEach(el=>el.disabled=active(state.project)||state.saving);}
 $('#segment-list').oninput=e=>{
   const el=e.target,field=el.dataset.reviewField;if(!field||active(state.project)||state.saving)return;
@@ -451,7 +503,9 @@ $('#segment-list').onclick=e=>{
   chooseSentence(Number(detail?.dataset.cueDetail??voice.dataset.cueVoice));
   if(voice)openSingle();else if(!$('#subtitle-detail-dialog').open)openCueDialog($('#subtitle-detail-dialog'));
 };
-for(const id of ['subtitle-filter','subtitle-page-size'])$('#'+id).onchange=()=>{state.listPage=0;state.subtitleKey=null;renderSentenceList(true);};
+function resetSubtitlePage(){state.listPage=0;state.subtitleKey=null;renderSentenceList(true);}
+$('#segment-search').oninput=resetSubtitlePage;
+for(const id of ['subtitle-filter','subtitle-page-size'])$('#'+id).onchange=resetSubtitlePage;
 $('#close-subtitle-detail').onclick=()=>$('#subtitle-detail-dialog').close();
 $('#subtitle-detail-dialog').addEventListener('close',()=>{$('#editor-video').pause();state.subtitleKey=null;renderSentenceList();renderVoiceBoard();});
 // The cue dialog's navigation remains useful without leaving the review page.
@@ -509,6 +563,9 @@ for(const id of ['subtitle-detail-dialog','single-voice-editor']){
 // Keep column labels below the save toolbar during natural document scrolling.
 const reviewToolbar=$('#panel-subtitles>.section-toolbar');
 new ResizeObserver(()=>$('#panel-subtitles').style.setProperty('--review-toolbar-height',reviewToolbar.getBoundingClientRect().height+'px')).observe(reviewToolbar);
+// Keep the dubbing column labels directly under the pinned pager on every width.
+const voicePager=$('.dubbing-board .table-pagination-top');
+if(voicePager)new ResizeObserver(()=>$('#panel-voices').style.setProperty('--voice-pager-height',voicePager.getBoundingClientRect().height+'px')).observe(voicePager);
 
 // An unavailable project keeps its current rows and drafts until the user restores it.
 function markProjectUnavailable(error){
