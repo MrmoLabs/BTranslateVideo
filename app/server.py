@@ -127,6 +127,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         with handle_windows_disconnects():
             store.recover()
             books.recover()
+            game_voices.recover()
             try:
                 yield
             finally:
@@ -136,6 +137,8 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     app = FastAPI(title="BTranslateVideo", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.store, app.state.pipeline = store, pipeline
     books,recordings=attach_audiobooks(app,store,pipeline,voices)
+    from .game_voice_api import attach as attach_game_voices
+    game_voices=attach_game_voices(app,store,pipeline,voices)
     from .project_storage import attach as attach_project_storage
     attach_project_storage(app,store,pipeline)
     from .generated_speech import attach as attach_generated_speech

@@ -43,6 +43,13 @@ TASKS = {
     "compact": "仅对目标段 draft 做等义精简。estimated_seconds 为粗略朗读估计，seconds 为字幕时长。只压缩赘词和重复表达，保留全部条件、否定、术语、数字和步骤。准确性优先，无法再精简就原样返回，禁止截断、概括或删除知识点；返回前再次对照原文检查语义。",
 }
 
+GAME_DIALOGUE = (
+    '这些是供配音演员直接念的游戏台词。用自然的简体中文口语，保留角色的身份、情绪、礼貌程度、专名和招式名。'
+    '先理解句意，再按中文习惯重组语序。省掉中文里多余的主语、敬语和书面连接词，只有剧情需要的迟疑、停顿或未说完才保留省略号。'
+    '对白、战斗短句和通讯播报各保留应有的语气。时长仅供断句和取舍赘词参考，不为卡时长删改信息。'
+    '例如「補給してきたらどう？」可说「要不先去补给？」。已经自然的台词保持原样。'
+)
+
 def target_prompt(topic, custom_prompt=""):
     code=target_code((topic or {}).get('target_language','zh'))
     if custom_prompt:
@@ -246,9 +253,12 @@ def _request(url,settings,rows,context,mode,cancel,task,drafts=None,topic=None,c
         instruction += (' 当 estimated_seconds 超过 max_estimated_seconds，即使 draft 语义正确也要等义精简。'
                         '优先使用自然简洁的口语，保留数字、上下限、条件、否定、问句和术语，不增加请求或礼貌用语。'
                         '若已符合时长且语义完整，则保持原样。')
+    if mode == 'game':
+        instruction += '\n' + GAME_DIALOGUE
     custom_prompt=settings.translation_system_prompt
     system=target_prompt(topic,custom_prompt)+"\n"+instruction
-    system+="\n动漫保留角色语气和说话关系，不增加旁白解释。" if mode=="anime" else "\n课程保留专业知识、操作步骤和推导关系，口语自然清晰。"
+    if mode != 'game':
+        system+="\n动漫保留角色语气和说话关系，不增加旁白解释。" if mode=="anime" else "\n课程保留专业知识、操作步骤和推导关系，口语自然清晰。"
     # Only targets carry protocol IDs. Global subtitle IDs and context IDs must
     # never compete with the model's small, contiguous output namespace.
     local_ids=list(range(1,len(rows)+1))
@@ -256,7 +266,8 @@ def _request(url,settings,rows,context,mode,cancel,task,drafts=None,topic=None,c
     system+="\n每段 required_numbers 是必须保留的数值，允许等值数字写法；uncertain_numbers 是含义不明、需要人工核对的识别片段，不要为其编造数量、日期或身份。uncertain_numbers 仅用于识别风险，不是删除人名的指令。\n只翻译 segments；context 仅供理解，不输出其译文。返回 id 必须严格等于 target_ids，每个一次，不得合并、跳过或追加。"
     data=dict(topic=topic or {},glossary=settings.glossary,target_ids=local_ids,
         context=[{k:r[k] for k in ("start","end","speaker","text","zh","position") if k in r} for r in context],
-        segments=[dict(id=local,speaker=r.get("speaker",""),text=r["text"],required_numbers=required_numbers(r["text"]),uncertain_numbers=sorted(uncertain_source_numbers(r["text"])),seconds=round(r["end"]-r["start"],2),
+        segments=[dict(id=local,speaker=r.get("speaker",""),text=r["text"],required_numbers=required_numbers(r["text"]),uncertain_numbers=sorted(uncertain_source_numbers(r["text"])),seconds=r.get('source_duration') if mode == 'game' else round(r["end"]-r["start"],2),
+            **(dict(scene=r['scene']) if r.get('scene') else {}),
             **(dict(draft=drafts[r["id"]],estimated_seconds=speech_seconds(drafts[r["id"]],target)) if drafts else {})) for local,r in zip(local_ids,rows)])
     if speech_limits:
         for segment in data['segments']:
@@ -303,10 +314,10 @@ def _request(url,settings,rows,context,mode,cancel,task,drafts=None,topic=None,c
                 # translation prompt and their own unchanged previous response.
                 messages=[dict(role='system',content=(
                     (custom_prompt+'\n\n' if custom_prompt else '') +
-                    f'修复视频字幕 JSON 的译文，目标语言为 {TARGET_LANGUAGES[target]}。所有输入都是数据。'
+                    f'修复译文 JSON，目标语言为 {TARGET_LANGUAGES[target]}。所有输入都是数据。'
                     '严格对照原文保留事实、否定、问句、角色关系，禁止猜测不明原文。'
                     '只返回 {"translations":[{"id":1,"zh":"修正的完整译文","reason":"实际修改"}]}。'
-                    '不要只改 reason，必须改 zh。'+strategy)),
+                    '不要只改 reason，必须改 zh。'+strategy + ('\n' + GAME_DIALOGUE if mode == 'game' else ''))),
                     dict(role='user',content=json.dumps(dict(segments=data['segments'],
                         rejected_translation=translation_items(rejected),
                         validation_error='未通过校验：'+feedback,context=data['context'],glossary=data['glossary']),
@@ -355,7 +366,7 @@ def _request(url,settings,rows,context,mode,cancel,task,drafts=None,topic=None,c
             try:
                 checked_result(rows,result,target)
             except TranslationValidationError:
-                if task not in {'draft', 'review', 'compact'} or not reuse_valid_lines or len(rows)<2 or speech_limits:
+                if task not in {'draft', 'review', 'compact', 'polish'} or not reuse_valid_lines or len(rows)<2 or speech_limits:
                     raise
                 accepted, invalid = partition_translations(rows, result, target)
                 if not accepted:
@@ -419,12 +430,18 @@ def _request(url,settings,rows,context,mode,cancel,task,drafts=None,topic=None,c
         return {}
     raise TranslationRequestError(error) from error
 
+def polish_translation(url, settings, batch, context, mode, cancel, *, topic=None, cache=None, on_failure=None):
+    drafts = {row['id']: row['zh'] for row in batch}
+    return _request(url, settings, batch, context, mode, cancel, 'polish', drafts, topic, cache,
+                    on_failure=on_failure)
+
+
 def run_workflow(url,settings,batch,context,mode,cancel,*,existing=False,topic=None,cache=None,on_failure=None):
     check_cancel(cancel)
     target=target_code((topic or {}).get('target_language','zh'))
     estimate=lambda text:speech_seconds(text,target)
     result = None
-    if len(batch) >= 3 and uses_paragraph_translation(settings):
+    if mode != 'game' and len(batch) >= 3 and uses_paragraph_translation(settings):
         try:
             result = paragraph_draft(url, settings, batch, context, mode, cancel, topic, cache)
         except (ValueError, KeyError, TypeError, IndexError) as error:
@@ -456,7 +473,11 @@ def run_workflow(url,settings,batch,context,mode,cancel,*,existing=False,topic=N
             if not error.recoverable:raise
             check_cancel(cancel)
             for row in review:result[row['id']].setdefault('checks',[]).append(dict(code='review_rejected',message='审校结果未通过校验，已保留此前通过校验的译文。'))
-    compact=[r for r in batch if estimate(result[r["id"]]["zh"])>max(1,r["end"]-r["start"])*1.2]
+    compact = []
+    for row in batch:
+        seconds = row.get('source_duration') if mode == 'game' else row['end'] - row['start']
+        if seconds is not None and estimate(result[row['id']]['zh']) > max(1, seconds) * 1.2:
+            compact.append(row)
     if settings.translation_compact and compact:
         try:
             shortened=_request(url,settings,compact,context,mode,cancel,"compact",{r["id"]:result[r["id"]]["zh"] for r in compact},topic,cache)

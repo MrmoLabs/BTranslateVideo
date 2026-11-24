@@ -53,13 +53,15 @@ function showSection(section){
   state.viewKey=view;state.section=section;
   $('#voice-library-page').hidden=section!=='library';
   $('#novels-page').hidden=section!=='novels';
+  $('#game-voices-page').hidden=section!=='game-voices';
   $('#settings-page').hidden=section!=='settings';
   $('#workspace').hidden=section!=='projects'||!state.projectDetail||!state.project;
   $('#welcome').hidden=section!=='projects'||!!(state.projectDetail&&state.project);
-  for(const [id,name] of [['menu-projects','projects'],['menu-library','library'],['menu-novels','novels'],['open-settings','settings']]){
+  for(const [id,name] of [['menu-projects','projects'],['menu-library','library'],['menu-novels','novels'],['menu-game-voices','game-voices'],['open-settings','settings']]){
     $('#'+id).classList.toggle('selected',section===name);$('#'+id).setAttribute('aria-current',section===name?'page':'false');
   }
-  $('#page-name').textContent=tr(section==='novels'?'小说有声书':section==='library'?'音色库':section==='settings'?'设置与模型':state.projectDetail&&state.project?'视频译制':'我的项目');
+  $('#page-name').textContent=tr(section==='game-voices'?'游戏音频汉化':section==='novels'?'小说有声书':section==='library'?'音色库':section==='settings'?'设置与模型':state.projectDetail&&state.project?'视频译制':'我的项目');
+  if(section!=='game-voices'&&changed)$$('#game-voices-page audio').forEach(audio=>audio.pause());
   if(section==='library')renderLibrary();
   if(changed)window.scrollTo({top:state.viewScroll[view]||0,left:0,behavior:'instant'});
 }

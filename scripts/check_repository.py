@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PRIVATE_DIRS = {"data", "projects", "voices", "audiobooks", "models", "runtime", "vendor", ".venv", ".git"}
+PRIVATE_DIRS = {"data", "projects", "voices", "audiobooks", "game_projects", "models", "runtime", "vendor", ".venv", ".git"}
 MEDIA = {".wav", ".flac", ".mp3", ".mp4", ".mkv", ".avi", ".mov", ".webm",
          ".gguf", ".pth", ".pt", ".safetensors", ".onnx", ".bin", ".zip", ".7z"}
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")

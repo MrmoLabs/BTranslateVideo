@@ -1,0 +1,295 @@
+/* Redesigned layout for the game audio localization workspace.
+   Loaded after game-voices.css: restyles the lines table, the filter bar and
+   the single-line inspector without changing the data flow in game-voices.js. */
+
+/* ---------- workspace shell ---------- */
+#game-voices-page.game-project-open > .project-heading,
+#game-voices-page.game-project-open > #game-overview { display: none; }
+#game-voices-page .game-topline { margin: 4px 0 8px; gap: 10px; }
+#game-voices-page .game-topline h2 { font-size: 20px; margin: 0; }
+#game-voices-page .game-topline .subtle { font-size: 11px; }
+#game-voices-page .game-topline #game-import { margin-left: auto; min-height: 30px; padding: 4px 10px; font-size: 12px; }
+#game-voices-page .game-topline #game-back { min-height: 26px; padding: 2px 6px; font-size: 11px; }
+
+#game-voices-page .game-job { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 6px 12px; margin-bottom: 8px; }
+#game-voices-page .game-job .button-group { gap: 8px; align-items: center; }
+#game-voices-page .game-job progress { width: 150px; height: 8px; }
+#game-voices-page .game-job p { margin: 0; font-size: 11px; }
+#game-voices-page .game-job p:empty { display: none; }
+#game-voices-page .game-job #game-packages:not(:empty) { margin: 0; display: inline-flex; gap: 8px; font-size: 11px; }
+#game-voices-page #game-job-phase { font-size: 12px; }
+#game-voices-page #game-job-skipped { margin: 4px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+#game-voices-page #game-job-skipped[hidden] { display: none; }
+#game-voices-page #game-show-skipped { min-height: 26px; padding: 2px 8px; font-size: 11px; }
+
+/* The two tool drawers share one compact row. */
+#game-workspace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+#game-workspace > .game-topline,
+#game-workspace > .game-job,
+#game-workspace > .game-studio { grid-column: 1 / -1; }
+#game-workspace > details.game-tools,
+#game-workspace > details.game-role-voices { grid-column: span 1; margin: 0; padding: 8px 12px; }
+#game-workspace > details.game-tools > summary { font-size: 12px; }
+#game-workspace:has(> .game-role-voices[open]) > :is(.game-tools, .game-role-voices) { grid-column: 1 / -1; }
+#game-voices-page .game-role-voices[open] > summary { margin-bottom: 10px; }
+#game-voices-page .game-role-voice-toolbar,
+#game-voices-page .game-role-voice-filters,
+#game-voices-page .game-role-voice-footer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0;
+}
+#game-voices-page .game-role-voice-toolbar { justify-content: space-between; margin-bottom: 8px; }
+#game-voices-page .game-role-voice-filters { flex: 1 1 270px; }
+#game-voices-page .game-role-voice-filters input { flex: 1 1 150px; max-width: 300px; }
+#game-voices-page .game-role-voice-filters select { width: auto; }
+#game-voices-page .game-role-voices :is(input[type="search"], select, button) {
+  min-height: 32px; padding: 4px 8px; margin: 0; font-size: 12px;
+}
+#game-voices-page .game-role-voice-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; }
+#game-voices-page .game-role-voice-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+#game-voices-page .game-role-voice-table thead { position: sticky; top: 0; z-index: 1; background: var(--soft); }
+#game-voices-page .game-role-voice-table th,
+#game-voices-page .game-role-voice-table td { padding: 6px 9px; border-bottom: 1px solid var(--line); text-align: left; }
+#game-voices-page .game-role-voice-table thead th:first-child { width: 26%; }
+#game-voices-page .game-role-voice-table thead th:last-child { width: 172px; }
+#game-voices-page .game-role-voice-table tbody th { font-weight: 500; overflow-wrap: anywhere; }
+#game-voices-page .game-role-voice-table tbody tr:last-child > * { border-bottom: 0; }
+#game-voices-page .game-role-voice-table td select { width: 100%; }
+#game-voices-page .game-role-voice-table td .button-group { gap: 5px; flex-wrap: nowrap; }
+#game-voices-page .game-role-voice-table td button { white-space: nowrap; }
+#game-voices-page .game-role-voice-footer { justify-content: space-between; margin-top: 8px; font-size: 12px; }
+#game-voices-page .game-role-voice-footer label { margin: 0; }
+#game-voices-page #game-vc-hint { flex: 1 1 100%; margin: 0; }
+#game-voices-page #game-role-voice-empty { margin: 12px 0; font-size: 12px; }
+
+@media (max-width: 600px) {
+  #game-voices-page .game-role-voice-table thead { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
+  #game-voices-page .game-role-voice-table,
+  #game-voices-page .game-role-voice-table tbody { display: block; }
+  #game-voices-page .game-role-voice-table tbody tr:not([hidden]) {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; padding: 7px 9px; border-bottom: 1px solid var(--line);
+  }
+  #game-voices-page .game-role-voice-table tbody th { grid-column: 1 / -1; }
+  #game-voices-page .game-role-voice-table tbody :is(th, td) { padding: 0; border: none; }
+}
+
+/* ---------- filter bar (was a tall sidebar) ---------- */
+#game-voices-page .game-studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(380px, 34%, 560px);
+  grid-template-areas: "filters filters" "lines inspector";
+  gap: 10px;
+  align-items: start;
+}
+#game-voices-page .game-filters {
+  grid-area: filters;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 12px;
+  padding: 9px 12px;
+}
+#game-voices-page .game-filters h3 { display: none; }
+#game-voices-page .game-filters label { flex: 1 1 130px; min-width: 0; margin: 0; font-size: 11px; }
+#game-voices-page .game-filters label:first-of-type { flex: 2 1 220px; }
+#game-voices-page .game-filters label.game-status-field { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+#game-voices-page .game-filters label > span { font-weight: 500; }
+#game-voices-page .game-filters input,
+#game-voices-page .game-filters select { min-height: 30px; margin: 0; font-size: 12px; padding: 4px 8px; }
+#game-voices-page .game-filters label.game-status-field > span { font-size: 11px; }
+#game-voices-page .game-status-select { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+#game-voices-page .game-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto; }
+#game-voices-page .game-chip { min-height: 26px; padding: 2px 9px; font-size: 11px; border-radius: 13px; background: #fff; border: 1px solid var(--line); }
+#game-voices-page .game-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+#game-voices-page #game-filter-clear,
+#game-voices-page #game-analyze-fit { min-height: 26px; padding: 2px 8px; font-size: 11px; }
+#game-voices-page #game-analyze-fit { color: var(--accent); }
+
+/* ---------- lines table ---------- */
+#game-voices-page .game-lines { grid-area: lines; padding: 12px; }
+#game-voices-page .game-lines .card-heading { margin-bottom: 6px; }
+#game-voices-page .game-lines .card-heading h3 { font-size: 15px; }
+#game-voices-page .game-lines .card-heading .subtle { font-size: 11px; }
+#game-voices-page .game-list-total { font-size: 11px; color: var(--muted); margin-left: 8px; }
+#game-voices-page .game-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 6px; }
+#game-voices-page .game-batch label { flex: 0 1 auto; margin: 0; display: flex; align-items: center; gap: 5px; font-size: 11px; }
+#game-voices-page .game-batch label > span { font-weight: 500; white-space: nowrap; }
+#game-voices-page .game-batch select { width: auto; min-height: 28px; padding: 3px 8px; margin: 0; font-size: 11px; max-width: 190px; }
+#game-voices-page .game-batch button { min-height: 28px; padding: 3px 10px; font-size: 11px; }
+#game-voices-page .game-batch #game-batch-voice-wrap { flex: 0 1 auto; }
+#game-voices-page #game-batch-vc-hint { flex: 1 1 100%; color: #9c2f24; font-size: 11px; }
+
+/* The dialogue table grows with the page instead of scrolling inside the card.
+   Pagination already bounds how many rows are rendered at once. */
+#game-voices-page .game-table-scroll { overflow: visible; border: 1px solid var(--line); border-radius: 8px; }
+#game-voices-page .game-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; table-layout: fixed; }
+#game-voices-page .game-table thead th { padding: 6px 8px; background: #f3f7f4; border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--muted); }
+#game-voices-page .game-table thead th:nth-child(1) { width: 32px; }
+#game-voices-page .game-table thead th.game-col-state-head { width: 116px; }
+#game-voices-page .game-table thead th.game-col-action-head { width: 140px; text-align: right; }
+#game-voices-page .game-table tbody tr { border-bottom: 1px solid var(--line); }
+#game-voices-page .game-table tbody tr:last-child { border-bottom: 0; }
+#game-voices-page .game-table tbody tr:hover { background: #f7faf8; }
+#game-voices-page .game-table tbody tr[aria-current="true"],
+#game-voices-page .game-table tbody tr.game-row-current { background: #eef7f1; box-shadow: inset 3px 0 0 var(--accent); }
+#game-voices-page .game-table td { padding: 5px 8px; vertical-align: top; }
+#game-voices-page .game-table td.game-col-check { padding-top: 9px; }
+#game-voices-page .game-open-row { display: block; width: 100%; text-align: left; border: 0; min-height: 0; padding: 0; background: transparent; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+#game-voices-page .game-line-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; color: var(--ink); }
+#game-voices-page .game-line-text.game-line-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+#game-voices-page .game-line-source { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-size: 11px; color: var(--muted); margin-top: 1px; }
+#game-voices-page .game-line-meta { display: block; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 1px; }
+#game-voices-page .game-state { display: inline-block; padding: 1px 6px; border-radius: 9px; font-size: 10px; line-height: 1.6; white-space: nowrap; background: var(--soft); color: var(--muted); }
+#game-voices-page .game-state[data-state="replaceable"] { background: #e0f0e6; color: #17604a; }
+#game-voices-page .game-state[data-state="generated"] { background: #fdf1dc; color: #8a5a12; }
+#game-voices-page .game-state[data-state="ready"] { background: #dfe9f7; color: #23527c; }
+#game-voices-page .game-state[data-state="tested"] { background: var(--accent); color: #fff; }
+#game-voices-page .game-state[data-state="untranslated"] { background: #fbe9e7; color: #8a322a; }
+#game-voices-page .game-state[data-state="risky"] { background: #fbe3df; color: #9c2f24; }
+#game-voices-page .game-col-state small { display: block; margin-top: 3px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#game-voices-page .game-col-actions { text-align: right; }
+#game-voices-page .game-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
+#game-voices-page .game-row-actions button { min-height: 24px; padding: 1px 6px; font-size: 10px; }
+#game-voices-page .game-empty-row td { padding: 22px 10px; text-align: center; color: var(--muted); }
+#game-voices-page .game-loading-row td { padding: 18px 10px; text-align: center; color: var(--muted); }
+
+/* ---------- pagination ---------- */
+#game-voices-page .game-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; }
+#game-voices-page .game-pager .game-list-total { margin-left: 0; }
+#game-voices-page .game-pager button { min-height: 28px; padding: 3px 9px; font-size: 11px; }
+#game-voices-page .game-pager #game-page { display: none; }
+#game-voices-page .game-page-jump,
+#game-voices-page .game-page-size { display: flex; align-items: center; gap: 4px; font-size: 11px; margin: 0; }
+#game-voices-page .game-page-jump input { width: 54px; min-height: 28px; margin: 0; padding: 3px 6px; text-align: center; }
+#game-voices-page .game-page-of { color: var(--muted); font-variant-numeric: tabular-nums; }
+#game-voices-page .game-page-size select { width: auto; min-height: 28px; margin: 0; padding: 3px 6px; font-size: 11px; }
+#game-voices-page #game-clear { margin-left: auto; }
+
+/* ---------- line editing and audition ---------- */
+#game-voices-page .game-inspector {
+  grid-area: inspector;
+  padding: 12px;
+  position: sticky;
+  top: 8px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+#game-voices-page .game-inspector-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#game-voices-page .game-inspector-head h3 { font-size: 15px; margin: 0; }
+#game-voices-page .game-inspector-nav { display: flex; gap: 4px; margin-left: auto; }
+#game-voices-page .game-inspector button { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+#game-voices-page .game-inspector #game-no-row { padding: 12px 4px; text-align: center; }
+#game-voices-page .game-line-header,
+#game-voices-page .game-audition-heading,
+#game-voices-page .game-audition-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; flex-wrap: wrap; }
+#game-voices-page .game-line-header { margin-bottom: 8px; font-size: 11px; overflow-wrap: anywhere; }
+#game-voices-page .game-inspector form,
+#game-voices-page .game-detail-fields { display: grid; gap: 8px; margin: 0; }
+#game-voices-page .game-inspector label,
+#game-voices-page .game-inspector textarea,
+#game-voices-page .game-inspector p { margin: 0; }
+#game-voices-page .game-inspector textarea { min-height: 44px; padding: 6px 8px; font-size: 13px; }
+#game-voices-page .game-inspector .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+#game-voices-page .game-inspector input,
+#game-voices-page .game-inspector select { min-height: 30px; margin: 0; padding: 4px 7px; font-size: 12px; }
+#game-voices-page .game-inspector .button-group { gap: 4px; }
+#game-voices-page .game-inspector #game-asset { font-size: 10px; overflow-wrap: anywhere; }
+#game-voices-page .game-inspector summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+#game-voices-page .game-inspector details[open] > summary { margin-bottom: 8px; }
+#game-voices-page .game-inspector form > details { border-top: 1px solid var(--line); padding: 7px 0 0; margin: 0; }
+#game-voices-page .game-performance { display: grid; gap: 8px; }
+#game-voices-page #game-drama3-fields:not([hidden]) { display: grid; gap: 8px; }
+#game-voices-page #game-drama3-status { margin: 0; }
+#game-voices-page .game-performance audio { width: 100%; height: 32px; }
+#game-voices-page .game-actions { justify-content: flex-end; }
+#game-voices-page .game-audition { display: grid; gap: 7px; padding: 8px; background: #f8faf9; border: 1px solid var(--line); border-radius: 8px; }
+#game-voices-page .game-audition h4 { font-size: 12px; margin: 0; }
+#game-voices-page .game-audition-heading button { background: #fff; }
+#game-voices-page .game-candidate-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr)); gap: 5px; max-height: 137px; overflow: auto; }
+#game-voices-page .game-candidate-card { display: flex; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+#game-voices-page .game-candidate-card:has([aria-pressed="true"]) { border-color: var(--accent); background: #eaf5ee; }
+#game-voices-page .game-candidate-card button { border: 0; background: transparent; margin: 2px; }
+#game-voices-page .game-candidate-item { display: flex; align-items: center; flex: 1; min-width: 0; gap: 6px; text-align: left; }
+#game-voices-page .game-candidate-item > span:last-of-type { min-width: 0; }
+#game-voices-page .game-candidate-item strong,
+#game-voices-page .game-candidate-item small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#game-voices-page .game-candidate-item strong { font-variant-numeric: tabular-nums; font-weight: 600; }
+#game-voices-page .game-candidate-item small,
+#game-voices-page .game-candidate-empty { font-size: 11px; color: var(--muted); }
+#game-voices-page .game-candidate-icon { color: var(--accent); font-size: 10px; }
+#game-voices-page .game-candidate-delete { flex: none; align-self: center; color: var(--muted); }
+#game-voices-page .game-candidate-delete:hover { color: #982d26; background: #fcebe9; }
+#game-voices-page #game-audition-title-current { font-size: 11px; font-weight: 600; }
+#game-voices-page #game-audition-audio { display: block; width: 100%; height: 36px; }
+#game-voices-page #game-audition-wave {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin: 4px 0;
+  cursor: pointer;
+  border-radius: 4px;
+  background: linear-gradient(to right, #d5eadd var(--game-wave-progress, 0%), var(--soft) var(--game-wave-progress, 0%));
+}
+#game-voices-page #game-audition-wave:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#game-voices-page #game-audition-meta { font-size: 11px; }
+#game-guide-record-dialog audio { display: block; width: 100%; margin: 8px 0; }
+#game-guide-record-dialog #game-record-status { min-height: 1.4em; }
+
+@media (max-width: 1280px) {
+  #game-voices-page .game-studio { grid-template-columns: minmax(0, 1fr) minmax(320px, .95fr); }
+}
+@media (max-width: 1050px) {
+  #game-workspace { grid-template-columns: 1fr; }
+  #game-voices-page .game-studio { grid-template-columns: 1fr; grid-template-areas: "filters" "lines" "inspector"; }
+  #game-voices-page .game-inspector { position: static; max-height: none; overflow: visible; }
+  #game-voices-page .game-inspector .game-tuning .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #game-voices-page .game-table thead th.game-col-state-head { width: 100px; }
+}
+@media (max-width: 700px) {
+  #game-voices-page .game-filters { padding: 8px 10px; }
+  #game-voices-page .game-filters label,
+  #game-voices-page .game-filters label:first-of-type { flex: 1 1 calc(50% - 8px); }
+  #game-voices-page .game-filters label:first-of-type,
+  #game-voices-page .game-filters label.game-status-field { flex: 1 1 100%; }
+  #game-voices-page .game-filters label.game-status-field { align-items: flex-start; }
+  #game-voices-page .game-table thead th.game-col-state-head,
+  #game-voices-page .game-table td.game-col-state { display: none; }
+  #game-voices-page .game-inspector .form-grid { grid-template-columns: 1fr; }
+}
+
+/* No candidates yet: the adopt/tested actions have nothing to act on. */
+#game-voices-page .game-scene-review {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #cddfd7;
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 8px;
+  background: #f3f8f5;
+}
+#game-voices-page .game-scene-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#game-voices-page .game-scene-heading strong { font-size: 14px; overflow-wrap: anywhere; }
+#game-voices-page .game-scene-heading p { margin: 3px 0 0; font-size: 12px; }
+#game-voices-page .game-scene-heading button { flex: 0 0 auto; }
+#game-voices-page #game-scene-player { margin-top: 10px; padding-top: 8px; border-top: 1px solid #cddfd7; }
+#game-voices-page #game-scene-player .button-group { gap: 6px; align-items: end; }
+#game-voices-page #game-scene-player label { margin: 0; font-size: 12px; }
+#game-voices-page #game-scene-player select { min-height: 32px; margin: 0; }
+#game-voices-page #game-scene-now { margin: 10px 0 6px; font-size: 13px; overflow-wrap: anywhere; }
+#game-voices-page #game-scene-audio,
+#game-voices-page #game-guide-audio { width: 100%; }
+#game-voices-page .game-state[data-state="original"] { color: #63491c; background: #f4e9d5; }
+
+#game-package-dialog { width: min(680px, calc(100vw - 32px)); }
+#game-package-dialog form { max-width: none; }
+#game-package-review { max-height: min(46vh, 420px); overflow: auto; padding-inline-start: 24px; }
+#game-package-review li { padding: 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+#game-package-review li div { display: flex; gap: 6px 12px; flex-wrap: wrap; font-size: 12px; }
+#game-package-review li[data-status="replace"] strong { color: var(--accent); }
+#game-package-review li[data-status="original"] strong { color: #63491c; }
+#game-package-review li:not([data-status="replace"], [data-status="original"]) strong { color: #9c2f24; }
+#game-package-review p { margin: 4px 0 0; }

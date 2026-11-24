@@ -339,6 +339,7 @@ $('#ui-language').onchange=()=>{
   renderProjectList();
   if(state.project){renderSentenceList();renderEditors();render(false);}
   else showSection(state.section);
+  if(state.section==='game-voices')refreshGameLanguage();
   if(state.proposal)renderProposalItems();
   guard(async()=>{await diagnostics();await refreshTtsSession();});
 };

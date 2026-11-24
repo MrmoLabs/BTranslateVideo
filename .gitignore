@@ -4,6 +4,9 @@
 /projects/
 /voices/
 /audiobooks/
+/game_projects/
+/app/game-data/nier-dialogue.json
+/app/game-data/nier-dialogue.json.gz
 /models/
 /runtime/
 /vendor/
