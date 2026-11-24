@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from .config import load_settings, Settings
 from .project_roles import project_roles
 from .diarization import DiarizationOptions, readiness, source_identity, check_environment
+from .subtitles import validate_segments
 
 
 class StartDiarization(DiarizationOptions):
@@ -17,10 +18,16 @@ class Assignment(BaseModel):
     speaker: str
 
 
+class SplitSelection(BaseModel):
+    id: int
+    retranslate: bool = False
+
+
 class ApplyDiarization(BaseModel):
     revision: int = Field(ge=0)
     request_id: str
-    assignments: list[Assignment] = Field(min_length=1, max_length=100000)
+    assignments: list[Assignment] = Field(default_factory=list, max_length=100000)
+    splits: list[SplitSelection] = Field(default_factory=list, max_length=30000)
 
 
 def attach_diarization(app, store, pipeline, editable):
@@ -56,13 +63,34 @@ def attach_diarization(app, store, pipeline, editable):
                 raise HTTPException(409,'识别结果已经失效，请重新识别')
             if proposal['source']!=source_identity(store.folder(identifier)):raise HTTPException(409,'原视频已变更，请重新识别')
             choices={item.id:item.speaker for item in data.assignments}
-            eligible={item['id'] for item in proposal['items']}
-            if len(choices)!=len(data.assignments) or set(choices)-eligible or set(choices.values())-(set(proposal['roles'])|project_roles(project)):
+            splits={item.id:item for item in data.splits}
+            eligible={item['id']:item for item in proposal['items']}
+            if len(choices)!=len(data.assignments) or choices.keys()-eligible.keys() or set(choices.values())-(set(proposal['roles'])|project_roles(project)):
                 raise ValueError('只能采用当前识别结果中的句子和角色，且句子不能重复')
-            rows=[{**row,'speaker':choices[row['id']]} if row['id'] in choices else dict(row) for row in project['segments']]
-            if not set(choices).issubset({row['id'] for row in rows}):raise HTTPException(409,'字幕编号已改变，请重新识别')
+            selected=choices.keys()|splits.keys()
+            if not selected or choices.keys()&splits.keys() or len(splits)!=len(data.splits) or any(not eligible.get(i,{}).get('split_parts') for i in splits):
+                raise ValueError('请选择有效的角色分配或拆句建议，同一句只能采用一次')
+            if not selected.issubset({row['id'] for row in project['segments']}):raise HTTPException(409,'字幕编号已改变，请重新识别')
+            rows=[]
+            used=set(choices.values())
+            next_id=max(row['id'] for row in project['segments'])+1
+            for row in project['segments']:
+                row_id=row['id']
+                if row_id not in splits:
+                    rows.append({**row,'speaker':choices.get(row_id,row['speaker'])})
+                    continue
+                if row['zh'].strip() and not splits[row_id].retranslate:
+                    raise ValueError('拆句会重置本句译文，请明确选择重新翻译')
+                for index,part in enumerate(eligible[row_id]['split_parts']):
+                    piece={key:value for key,value in row.items() if key not in {'words','review_status','review_signature'}}
+                    rows.append({**piece,**part,'id':next_id if index else row_id,'zh':''})
+                    next_id+=bool(index)
+                    used.add(part['speaker'])
+            if splits:
+                validate_segments(rows,project['media']['duration'])
+            split_checks={str(row_id) for row_id in splits}
             pipeline.snapshot(identifier)
-            used=set(choices.values());refs={key:value for key,value in proposal['references'].items() if key in used and not project['references'].get(key)}
+            refs={key:value for key,value in proposal['references'].items() if key in used and not project['references'].get(key)}
             for name in refs.values():
                 if not (store.folder(identifier)/name).is_file():raise ValueError('候选参考音文件已丢失，请重新识别')
             existing=project_roles(project)
@@ -70,9 +98,10 @@ def attach_diarization(app, store, pipeline, editable):
             for speaker in used:
                 if speaker in existing:roles[speaker]={**roles.get(speaker,{}),'diarization_linked':True}
             updated=store.update(identifier,segments=rows,roles=roles,references={**project['references'],**refs},
-                reference_origins={**project.get('reference_origins',{}),**{key:value for key,value in proposal['reference_origins'].items() if key in refs}},
-                diarization_proposal={**proposal,'status':'applied','applied_ids':sorted(choices)},outputs={},dub_signature='',export_signature='',
+                reference_origins={**project.get('reference_origins',{}),**{key:value for key,value in proposal.get('reference_origins',{}).items() if key in refs}},
+                diarization_proposal={**proposal,'status':'applied','applied_ids':sorted(selected)},outputs={},dub_signature='',export_signature='',
+                translation_checks={key:value for key,value in project.get('translation_checks',{}).items() if key not in split_checks},
                 audition=None,audition_request=None,dub_timing=[],preview_info={},tts_runtime=None,status='idle',error='')
             pipeline.write_subtitles(identifier)
-            store.log(identifier,f'已采用 {len(choices)} 句说话人分配；原角色与音色保留，旧字幕和成片已备份')
+            store.log(identifier,f'已采用 {len(choices)} 句角色分配和 {len(splits)} 处拆句，旧字幕和成片已备份')
             return updated

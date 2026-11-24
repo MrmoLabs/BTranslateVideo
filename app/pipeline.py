@@ -18,15 +18,17 @@ from .audio_cache import reusable_voice_clip
 from .export_media import export_project, preview_existing, audio_mode, original_background
 from .store import Store
 from .subtitles import render_srt, validate_segments
-from .segmentation import semantic_segments, VERSION as SEGMENTATION_VERSION
-from .translation import local_translator, translate_batch
-from .translation_quality import translation_batches, translation_context, run_workflow
+from .segmentation import semantic_segments, segmentation_settings, VERSION as SEGMENTATION_VERSION
+from .translation import local_translator, log_network_batch, translate_batch
+from .translation_quality import translation_context, translation_results, run_workflow
 from .project_roles import project_roles,reference_window,UNASSIGNED_SPEAKER
 from .translation_proposals import generate_proposal
+from .translation_requests import TranslationRequests, request_scope
 from .emotions import emotion_fields
+from .drama3 import Drama3Session
 from .tts_session import TTSSession
 from .progress import ACTIVE, TERMINAL, new_progress, advance, finish, tts_detail
-from .model_backends import tts_backend, tts_model_signature, validate_tts, transcribe, synthesize_service
+from .model_backends import tts_backend, tts_model_signature, validate_tts, transcribe, synthesize_service, translation_parallelism
 from .languages import target_code, target_files, tts_language
 
 WORKER = ROOT / "scripts" / "model_worker.py"
@@ -36,7 +38,7 @@ def fingerprint(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
 
 
-def make_voice_clip(item,folder,reference,settings,model_signature,reference_hash,target_language="zh"):
+def make_voice_clip(item,folder,reference,settings,model_signature,reference_hash,target_language="zh",*,emotion_reference=None):
     config=emotion_fields(item)
     validate_tts(settings,target_language,[item])
     identity=dict(schema=1,text=item['zh'],speaker=item['speaker'],reference=reference_hash,model=str(resolve(settings.index_model)),model_signature=model_signature,version=settings.index_version)
@@ -44,9 +46,38 @@ def make_voice_clip(item,folder,reference,settings,model_signature,reference_has
         identity.update(model=settings.tts_name,version=settings.tts_provider,model_signature=tts_model_signature(settings))
         if not tts_backend(settings).reference_audio:identity.update(reference='',speaker=settings.tts_voice)
     if target_code(target_language)!='zh':identity['target_language']=target_language
-    if config:identity['expression']=config
+    if config:identity['expression']=dict(config)
+    if emotion_reference is not None:
+        identity['emotion_reference'] = file_hash(emotion_reference)
+        config['emotion_reference'] = str(emotion_reference)
     key=fingerprint(identity)
     return dict(id=item['id'],text=item['zh'],reference=str(folder/reference),output=str(folder/'cache'/('tts-'+key+'.wav')),**config,**(dict(lang=target_language.upper()) if target_language!='zh' else {}))
+
+
+def source_emotion_reference(project, row, folder, settings, cancel, overlaps):
+    from bisect import bisect_right
+    from .source_audio import source_audio_range
+
+    if row.get('emotion') != 'source' or project['media'].get('audio') is False:
+        return None
+    start, end = row['start'], row['end']
+    if not .4 <= end - start <= 15:
+        return None
+    for windows, ends in overlaps:
+        index = bisect_right(ends, start)
+        if index < len(windows) and windows[index][0] < end:
+            return None
+    path = source_audio_range(folder, start, end, settings, cancel)
+    return path if wav_duration(path) >= .35 else None
+
+
+def source_emotion_overlaps(project):
+    from .diarization import overlap_windows
+
+    proposal = project.get('diarization_proposal') or {}
+    turns = proposal.get('turns', []) if proposal.get('status') == 'applied' else []
+    windows = [overlap_windows(project['segments']), overlap_windows(turns)]
+    return [(spans, [end for _, end in spans]) for spans in windows]
 
 
 def file_hash(path: Path) -> str:
@@ -65,6 +96,8 @@ def dub_signature(project, folder, settings):
     identity=dict(schema=5, alignment_options={key:getattr(settings,key) for key in ("alignment_mode","alignment_fallback_speed","alignment_fallback_lead","alignment_fallback_lag")}, alignment_policy='short-original-speed', segments=content(project["segments"]), references=refs, model=str(model_dir), model_signature=model_signature, version=settings.index_version, max_speed=settings.max_speed, max_lead=settings.max_lead, max_lag=settings.max_lag)
     if settings.tts_provider!='indextts':identity.update(model=settings.tts_name,model_signature=tts_model_signature(settings),version=settings.tts_provider)
     if target_code(project)!='zh':identity['target_language']=target_code(project)
+    if any(row.get('emotion') == 'source' for row in project['segments']):
+        identity['source_emotion_overlap'] = source_emotion_overlaps(project)
     return fingerprint(identity)
 
 
@@ -99,8 +132,10 @@ class Pipeline:
         self.futures = {}
         self.lock = threading.RLock()
         self.tts = TTSSession()
+        self.drama3 = Drama3Session()
         self.model_task = dict(status='idle', error='')
         self.model_log = None
+        self.translation_requests = TranslationRequests()
 
     def tts_status(self):
         with self.lock:
@@ -146,6 +181,7 @@ class Pipeline:
 
     def _load_tts_model(self, settings, cancel, folder):
         try:
+            self.drama3.release()
             with self.lock:self.model_task={**self.model_task,'status':'loading','processing':advance(self.model_task['processing'],phase='model_load',message='准备配音模型')}
             request=dict(operation='load',clips=[],index_root=str(resolve(settings.index_root)),
                          model=str(resolve(settings.index_model)),version=settings.index_version)
@@ -167,18 +203,25 @@ class Pipeline:
         return identifier in self.events
 
     def submit(self, identifier: str, stage: str, settings: Settings):
-        if stage not in {"analyze", "resegment", "retranscribe", "check_asr", "translate", "dub", "export", "preview", "optimize", "audition", "retranslate", "reference", "diarize", "subtitle_review", "all"}:
+        if stage not in {"analyze", "resegment", "retranscribe", "check_asr", "translate", "dub", "export", "preview", "optimize", "audition", "retranslate", "retranslate_all", "reference", "diarize", "subtitle_review", "all"}:
             raise ValueError("无效处理阶段")
         with self.lock:
             if self.busy(identifier):
                 raise ValueError("此项目已在队列中")
             from .project_experience import effective_asr,validate_language,steps
             project=self.store.read(identifier)
+            if stage == "retranslate_all" and (not project["segments"] or project.get("goal") == "transcribe"):
+                raise ValueError("请在翻译项目中先生成或导入原文字幕")
             settings=effective_asr(settings,project)
             if stage in {'retranscribe','check_asr'} or stage in {'analyze','all'} and not project['segments']:
                 validate_language(settings,project['language'])
             event = threading.Event()
-            queued=self.store.update(identifier, status="queued", stage=stage, error="", progress=0, processing=new_progress(stage,steps(project) if stage=='all' else None))
+            preview = {"translation_preview": None} if stage in {"optimize", "retranslate_all"} else {}
+            processing = new_progress(stage,steps(project) if stage=='all' else None)
+            if stage in {"all","translate","optimize","retranslate","retranslate_all","subtitle_review","analyze","resegment","retranscribe"}:
+                processing["network_translation"] = settings.translation_provider in {"openai_remote","bilibili"}
+            queued=self.store.update(identifier, status="queued", stage=stage, error="", progress=0,
+                processing=processing, **preview)
             self.events[identifier] = event
             try:self.futures[identifier]=self.pool.submit(self.execute, identifier, stage, settings, event)
             except Exception as exc:
@@ -215,6 +258,7 @@ class Pipeline:
             for event in self.events.values():
                 event.set()
         self.tts.close()
+        self.drama3.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def progress(self, identifier, stage, percent, message, detail=None):
@@ -243,12 +287,18 @@ class Pipeline:
 
     def execute(self, identifier, stage, settings, cancel):
         folder = self.store.folder(identifier)
+        trace_token = None
         try:
             (folder / "cache").mkdir(exist_ok=True)
             check_cancel(cancel)
+            self.drama3.release()
             translation_incomplete=False
             from .project_experience import goal,effective_asr
             project=self.store.read(identifier);settings=effective_asr(settings,project)
+            processing = project.get("processing") or {}
+            if processing.get("network_translation"):
+                trace_token = request_scope.set((self.translation_requests, identifier, processing["id"],
+                    settings.translation_provider == "openai_remote" and settings.translation_api_stream))
             project_goal=goal(project)
             self.store.update(identifier, status="running")
             self.begin_stage(identifier,"analyze" if stage in {"resegment","retranscribe","all"} else stage)
@@ -275,6 +325,9 @@ class Pipeline:
             if stage == "optimize":
                 self.tts.release("为译文优化释放显存")
                 generate_proposal(self.store, identifier, settings, cancel, self.progress)
+            if stage == "retranslate_all":
+                self.tts.release("为重新翻译释放显存")
+                generate_proposal(self.store, identifier, settings, cancel, self.progress, retranslate=True)
             if stage == "preview":
                 self.preview(identifier, settings, cancel)
             if stage == 'audition':
@@ -315,6 +368,8 @@ class Pipeline:
                 self.store.update(identifier, status="failed", error=str(exc))
                 self.store.log(identifier, "处理失败：" + str(exc)[-2500:])
         finally:
+            if trace_token is not None:
+                request_scope.reset(trace_token)
             with self.lock:
                 self.events.pop(identifier, None)
                 self.futures.pop(identifier,None)
@@ -397,10 +452,21 @@ class Pipeline:
                 on_progress=lambda value:self.progress(identifier,stage,10,value.get('message','识别原文'),value))
             atomic_json(meta_path, metadata)
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
-        self.progress(identifier, stage, 40, "本地模型恢复完整句子，校验全部原词与时间轴",dict(phase="segmentation_model"))
-        self.tts.release("为本地翻译释放显存")
-        with local_translator(settings, folder / "process.log", cancel) as url:
-            segments = semantic_segments(raw, project["media"]["duration"], url, settings, project["mode"], cancel, folder / "cache", lambda done, total: self.progress(identifier, stage, 40 + round(done / total * 55), f"语义断句 {done}/{total} 词",dict(phase="segmentation",done=done,total=total,unit="words")))
+        self.progress(identifier, stage, 40, "模型恢复完整句子，校验全部原词与时间轴",dict(phase="segmentation_model"))
+        self.tts.release("为语义断句释放显存")
+        planner = segmentation_settings(settings)
+        def review_progress(done,total,failed):
+            message=f"复核相邻字幕边界 {done}/{total} 处"
+            if failed:
+                message+=f"，{failed} 处尚未完成模型复核"
+            self.progress(identifier,stage,95+round(done/total*4),message,
+                          dict(phase="segmentation_review",done=done,total=total,unit="segments"))
+
+        with local_translator(planner, folder / "process.log", cancel) as url:
+            segments = semantic_segments(raw, project["media"]["duration"], url, planner, project["mode"],
+                cancel, folder / "cache", lambda done,total:self.progress(identifier,stage,40+round(done/total*55),
+                f"语义断句 {done}/{total} 词",dict(phase="segmentation",done=done,total=total,unit="words")),
+                review_progress=review_progress)
         segments = validate_segments(segments, project["media"]["duration"])
         check_cancel(cancel)
         if project["segments"]:
@@ -421,19 +487,27 @@ class Pipeline:
         if not pending:
             self.store.log(identifier, "已有全部译文，保留校对结果")
             return
-        self.progress(identifier, "translate", 5, "载入本地翻译模型；已完成译文将被保留")
+        self.progress(identifier, "translate", 5, "准备翻译模型；已完成译文将被保留")
         self.tts.release("为本地翻译释放显存")
-        with local_translator(settings, self.store.folder(identifier) / "process.log", cancel) as url:
+        folder = self.store.folder(identifier)
+        topic = dict(title=project["name"], language=project["language"], target_language=target_code(project), mode=project["mode"])
+        parallel = translation_parallelism(settings)
+        server_options = dict(parallel=parallel) if parallel > 1 else {}
+        with local_translator(settings, folder / "process.log", cancel, **server_options) as url:
             completed = skipped = translated = 0
             self.progress(identifier,"translate",5,"开始翻译与语义审校",dict(phase="translation_batches",done=0,total=len(pending),unit="segments"))
-            for indices in translation_batches(segments, pending, settings.translation_batch):
+            def request(indices, context):
                 batch = [segments[i] for i in indices]
                 batch_checks={};failures={}
                 def failed(row,error):
                     # Keep invalid output out of the editable translation and audio.
                     failures[row['id']]=str(error)[:1000]
-                result = translate_batch(url, settings, batch, translation_context(segments, indices), project["mode"], cancel,
-                    cache=self.store.folder(identifier) / "cache", topic=dict(title=project["name"], language=project["language"], target_language=target_code(project), mode=project["mode"]),on_checks=batch_checks.update,on_failure=failed)
+                with log_network_batch(settings, [row['id'] for row in batch], lambda message: self.store.log(identifier, message)):
+                    result = translate_batch(url, settings, batch, context, project["mode"], cancel,
+                        cache=folder / "cache", topic=topic,on_checks=batch_checks.update,on_failure=failed)
+                return result, batch_checks, failures
+
+            for indices, (result, batch_checks, failures) in translation_results(segments, pending, settings, parallel, request):
                 check_cancel(cancel)
                 for index in indices:
                     row=segments[index]
@@ -482,7 +556,7 @@ class Pipeline:
         self.progress(identifier,'retranslate',0,f"重新翻译第 {row['id']} 句；原译文保持不变",dict(phase='translation_batches',done=0,total=1,unit='segments'))
         self.tts.release('为单句翻译释放显存')
         with local_translator(settings,folder/'process.log',cancel) as url:
-            result=run_workflow(url,settings,[row],translation_context(project['segments'],[index]),project['mode'],cancel,existing=True,
+            result=run_workflow(url,settings,[row],translation_context(project['segments'],[index],settings),project['mode'],cancel,existing=True,
                 topic=dict(title=project['name'],language=project['language'],target_language=target_code(project),mode=project['mode']),cache=None)
         check_cancel(cancel)
         current=self.store.read(identifier)
@@ -622,7 +696,14 @@ class Pipeline:
         if row['speaker'] not in refs: raise ValueError('请先为这个角色上传参考声音')
         folder=self.store.folder(identifier);model=resolve(settings.index_model)
         signature=tts_model_signature(settings)
-        clip=make_voice_clip(row,folder,refs[row['speaker']],settings,signature,file_hash(folder/refs[row['speaker']]) if refs[row['speaker']] else '',target_code(project))
+        emotion = None
+        if row.get('emotion') == 'source':
+            audition_rows = [item for item in project['segments'] if item['id'] != row['id']] + [row]
+            overlaps = source_emotion_overlaps({**project, 'segments': audition_rows})
+            emotion = source_emotion_reference(project, row, folder, settings, cancel, overlaps)
+            if emotion is None:
+                self.store.log(identifier, f'第 {row["id"]} 句的原声片段不适合做情绪参考，沿用角色参考音。')
+        clip=make_voice_clip(row,folder,refs[row['speaker']],settings,signature,file_hash(folder/refs[row['speaker']]) if refs[row['speaker']] else '',target_code(project),emotion_reference=emotion)
         raw=Path(clip['output']);reusable=reusable_voice_clip(raw,lambda path,_:self.store.log(identifier,f'已隔离损坏的配音缓存 {path.name}，将重新生成。'))
         self.synthesize(identifier,[] if reusable else [clip],1,settings,cancel,'audition')
         check_cancel(cancel)
@@ -656,13 +737,22 @@ class Pipeline:
             raise ValueError("IndexTTS 模型目录不存在")
         model_signature = tts_model_signature(settings)
         hashes = {speaker: file_hash(folder / reference) if reference else "" for speaker, reference in refs.items()}
+        overlaps = source_emotion_overlaps(project) if any(item.get('emotion') == 'source' for item in segments) else ()
+        skipped_expression = []
         for item in segments:
-            clip=make_voice_clip(item,folder,refs[item['speaker']],settings,model_signature,hashes[item['speaker']],target_code(project))
+            check_cancel(cancel)
+            emotion = source_emotion_reference(project, item, folder, settings, cancel, overlaps)
+            if emotion is None and item.get('emotion') == 'source':
+                skipped_expression.append(item['id'])
+            clip=make_voice_clip(item,folder,refs[item['speaker']],settings,model_signature,hashes[item['speaker']],target_code(project),emotion_reference=emotion)
             path=Path(clip['output'])
             clips.append((item, path))
             if clip["output"] not in pending_outputs and not reusable_voice_clip(path,lambda path,_:self.store.log(identifier,f'已隔离损坏的配音缓存 {path.name}，将重新生成。')):
                 pending.append(clip)
                 pending_outputs.add(clip["output"])
+        if skipped_expression:
+            ids = '、'.join(map(str, skipped_expression[:10]))
+            self.store.log(identifier, f'{len(skipped_expression)} 句原声不适合作情绪参考，沿用角色参考音（字幕编号：{ids}）。')
         if pending and len(pending)<len(clips):
             from .audio_alignment import preflight_cached,AlignmentBlocked
             self.progress(identifier,'dub',3,'先检查已缓存语音的时间，避免重复长时间合成',dict(phase='audio_preflight'))

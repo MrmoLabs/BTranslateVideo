@@ -50,6 +50,8 @@ jobs:
           node --check app/static/i18n.js
           node --check app/static/workspace.js
           node --check app/static/novels.js
+          node --check app/static/game-voices.js
+          node --check app/static/game-voices-ui.js
           node --check app/static/recorder.js
           node --check app/static/model-backends.js
           node --check app/static/tts-controls.js
@@ -58,6 +60,8 @@ jobs:
           node --check app/static/source-audio.js
           node --check app/static/diarization.js
           node tests/check_i18n.cjs
+          node tests/check_workbench_layout.cjs
+          node tests/check_game_workspace.cjs
           node tests/check_progress_ui.cjs
           node --check app/static/workflow-core.js
           node --check app/static/workflow.js

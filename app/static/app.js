@@ -2,8 +2,8 @@
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const state={id:null,project:null,projects:[],dirty:false,audioDirty:false,selectionVersion:0,tab:'source',rows:[],selected:0,listPage:0,poll:false,editorGeneration:0,saving:false};
 const labels={idle:'等待开始',queued:'排队中',running:'处理中',cancelling:'正在取消',cancelled:'已取消',interrupted:'上次运行中断',done:'已完成',failed:'需要处理'};
-const stages={analyze:'识别原文',resegment:'复用识别结果断句',retranscribe:'重新识别原声',check_asr:'短音频试识别',translate:'翻译为目标语言',dub:'生成整片配音',export:'生成成片',background:'分离背景音',preview:'生成页面预览',all:'完整译制',optimize:'优化译文建议',audition:'生成本句试听',retranslate:'单句校对',subtitle_review:'批量字幕校对',reference:'从原片取样',diarize:'识别说话人'};
-const emotions={inherit:'沿用参考音',happy:'开心',angry:'愤怒',sad:'悲伤',afraid:'害怕',disgusted:'厌恶',melancholic:'低落',surprised:'惊讶',calm:'平静'};
+const stages={analyze:'识别原文',resegment:'复用识别结果断句',retranscribe:'重新识别原声',check_asr:'短音频试识别',translate:'翻译为目标语言',dub:'生成整片配音',export:'生成成片',background:'分离背景音',preview:'生成页面预览',all:'完整译制',optimize:'优化译文建议',retranslate_all:'重新翻译全部',audition:'生成本句试听',retranslate:'单句校对',subtitle_review:'批量字幕校对',reference:'从原片取样',diarize:'识别说话人'};
+const emotions={inherit:'沿用参考音',source:'跟随本句原声',happy:'开心',angry:'愤怒',sad:'悲伤',afraid:'害怕',disgusted:'厌恶',melancholic:'低落',surprised:'惊讶',calm:'平静'};
 const sourceLanguages={"": "自动检测", "en": "英语", "ja": "日语", "ko": "韩语", "fr": "法语", "de": "德语", "es": "西班牙语", "pt": "葡萄牙语", "it": "意大利语", "ru": "俄语", "ar": "阿拉伯语", "hi": "印地语", "zh": "中文"};
 function languageName(code){return tr(sourceLanguages[code]||code||tr("自动检测"));}
 const strengths={low:'轻度',medium:'中度',high:'较强'};
@@ -43,7 +43,15 @@ $$('.tab').forEach(e=>e.onclick=()=>switchTab(e.dataset.tab));$$('[data-go]').fo
 
 function confirmChoice(message,{save=false,title='请确认操作',proceed='继续'}={}){return new Promise(resolve=>{const d=$('#confirm-dialog');$('#confirm-title').textContent=title;$('#confirm-message').textContent=message;$('#confirm-save').hidden=!save;$('#confirm-discard').textContent=save?tr("放弃修改并继续"):proceed;$('#confirm-cancel').textContent=save?tr("继续编辑"):tr("取消");let settled=false;function done(value){if(settled)return;settled=true;d.close();resolve(value);}$('#confirm-save').onclick=()=>done('save');$('#confirm-discard').onclick=()=>done('discard');$('#confirm-cancel').onclick=()=>done('cancel');d.oncancel=e=>{e.preventDefault();done('cancel');};d.showModal();});}
 async function allowLeave(){if(!state.dirty&&!state.audioDirty)return true;const result=await confirmChoice(tr("当前校对或声音设置尚未保存。保存后再切换，或继续留在这里编辑。"),{save:true,title:tr("保留当前修改")});if(result==='cancel')return false;if(result==='discard'&&typeof clearProjectDraft==='function')clearProjectDraft(state.id);if(result==='save'){if(state.dirty)await saveSegments();if(state.audioDirty)await saveAudioOptions();if(state.dirty||state.audioDirty)throw Error(tr("还有新输入的修改未保存，请再保存一次"));}return true;}
-async function diagnostics(){const d=await api('/api/diagnostics');const ready=!!d.ffmpeg&&!!d.ffprobe&&d.asr_ready&&d.translation_ready&&d.tts_ready&&d.separation_ready;$('#environment-summary').textContent=ready?tr(d.service_configured?"本地接口已配置 · 推理需验证":"模型文件已准备 · 推理需验证"):tr("部分环境待准备 · 查看设置");$('#environment-settings').title=ready?tr("全程本地处理，点击查看设置"):tr("打开设置检查模型与工具路径");}
+async function diagnostics(){
+  const d=await api('/api/diagnostics');
+  const ready=!!d.ffmpeg&&!!d.ffprobe&&d.asr_ready&&d.translation_ready&&d.tts_ready&&d.separation_ready;
+  const location=$('#processing-location');
+  location.dataset.i18n=d.local_only?'全程本地处理':d.backends?.translation==='openai_remote'?'网络 API 处理字幕文字':'B 站 API 处理字幕文字';
+  location.textContent=tr(location.dataset.i18n);
+  $('#environment-summary').textContent=ready?tr(d.service_configured?'模型接口已配置 · 推理需验证':'模型文件已准备 · 推理需验证'):tr('部分环境待准备 · 查看设置');
+  $('#environment-settings').title=tr('打开设置检查模型与工具路径');
+}
 async function refreshList(){state.projects=await api('/api/projects');renderProjectList();}
 function renderProjectList(){const query=$('#project-search').value.trim().toLowerCase();$('#project-count').textContent=state.projects.length;const projects=state.projects.filter(p=>p.name.toLowerCase().includes(query));$('#project-list').innerHTML=projects.map(p=>`<button class="project-item ${p.id===state.id?'active':''}" data-id="${p.id}" title="${esc(p.name)}"><b>${esc(p.name)}</b><small><i class="project-state-dot ${esc(p.status)}"></i>${languageName(p.language)} · ${p.mode==='anime'?tr("动漫"):tr("课程")} · ${tr(labels[p.status]||p.status)}</small></button>`).join('')||tr("<p class=\"subtle\">没有匹配的项目</p>");$$('.project-item').forEach(e=>e.onclick=()=>guard(()=>selectProject(e.dataset.id)));$('#recent-projects').innerHTML=state.projects.slice(0,3).map(p=>tr("<button class=\"recent-card\" data-id=\"{0}\"><b>{1}</b><small>{2} → {4} · {3} <span>↗</span></small></button>",p.id,esc(p.name),languageName(p.language),tr(labels[p.status]||p.status),languageName(targetLanguage(p)))).join('')||tr("<p class=\"subtle\">导入一个视频，就可以开始第一个项目。</p>");$$('.recent-card').forEach(e=>e.onclick=()=>guard(()=>selectProject(e.dataset.id)));}
 $('#project-search').oninput=renderProjectList;
@@ -55,10 +63,8 @@ function render(full=false){const p=state.project;if(!p)return;$('#page-name').t
 function renderNextAction(){if(typeof renderWorkflow==='function')renderWorkflow();}
 function renderEditingControls(){const busy=active(state.project);$('#release-tts').disabled=busy||!state.ttsSession?.alive||state.ttsSession?.busy;['run-all','run-analyze','run-translate','run-resegment','run-optimize','run-dub','run-export','run-preview','save-segments','save-draft-banner','save-audio-options'].forEach(id=>$('#'+id).disabled=busy||state.saving||!!state.projectUnavailable);['source-srt','chinese-srt','background-file','background-mode','background-gain','source-text','chinese-text','voice-text','segment-start','segment-end','segment-speaker','emotion-select','emotion-strength'].forEach(id=>$('#'+id).disabled=busy);$('#emotion-strength').disabled=busy||(currentRow()?.emotion||'inherit')==='inherit';if(!currentRow())['source-text','chinese-text','voice-text','segment-start','segment-end','segment-speaker','emotion-select','emotion-strength'].forEach(id=>$('#'+id).disabled=true);$('#run-audition').disabled=busy||state.saving||!!state.projectUnavailable||!currentRow()?.zh?.trim();$('#run-audition').textContent=busy&&state.project.stage==='audition'?tr("正在生成试听…"):tr("▷ 生成本句试听");$('#run-audition').setAttribute('aria-busy',String(busy&&state.project.stage==='audition'));updateAudioForm();if(typeof renderWorkflow==='function')renderWorkflow();}
 
-function filteredRows(){const q=$('#segment-search').value.trim().toLowerCase();return state.rows.map((r,i)=>({r,i})).filter(({r})=>!q||`${r.text}\n${r.zh}`.toLowerCase().includes(q));}
-function renderSentenceList(){const items=filteredRows(),pages=Math.max(1,Math.ceil(items.length/20));state.listPage=Math.min(state.listPage,pages-1);$('#list-count').textContent=tr("{0} 句",items.length);$('#segment-list').innerHTML=items.slice(state.listPage*20,(state.listPage+1)*20).map(({r,i})=>tr("<button class=\"sentence-item {0}\" data-index=\"{1}\" aria-label=\"选择第 {2} 句\"><span class=\"sentence-number\"><span>第 {3} 句 · {4}</span><span>{5}</span></span><span class=\"sentence-snippet\">{6}</span></button>",i===state.selected?'active':'',i,r.id,r.id,clock(r.start),r.zh?tr("已翻译"):tr("待翻译"),esc(r.zh||r.text))).join('')||tr("<p class=\"empty-inline\">没有匹配的句子</p>");$$('.sentence-item').forEach(e=>e.onclick=()=>chooseSentence(Number(e.dataset.index)));$('#segments-page').textContent=`${state.listPage+1} / ${pages}`;$('#segments-prev').disabled=state.listPage===0;$('#segments-next').disabled=state.listPage>=pages-1;}
 function chooseSentence(index){state.selected=Math.max(0,Math.min(index,state.rows.length-1));$('#sentence-audio').pause();$('#editor-video').pause();renderSentenceList();renderEditors();}
-$('#segment-search').oninput=()=>{state.listPage=0;renderSentenceList();};$('#segments-prev').onclick=()=>{state.listPage--;renderSentenceList();};$('#segments-next').onclick=()=>{state.listPage++;renderSentenceList();};$('#sentence-prev').onclick=()=>chooseSentence(state.selected-1);$('#sentence-next').onclick=()=>chooseSentence(state.selected+1);
+$('#sentence-prev').onclick=()=>chooseSentence(state.selected-1);$('#sentence-next').onclick=()=>chooseSentence(state.selected+1);
 function renderEditors(){const r=currentRow();$('#editor-empty').hidden=!!r;$('#editor-fields').hidden=!r;$('#voice-select').innerHTML=state.rows.map((s,i)=>tr("<option value=\"{0}\">第 {1} 句 · {2} · {3}</option>",i,s.id,clock(s.start),esc((s.zh||s.text).slice(0,42)))).join('')||tr("<option value=\"\">先生成字幕和译文</option>");$('#voice-select').value=String(state.selected);$('#sentence-prev').disabled=!r||state.selected===0;$('#sentence-next').disabled=!r||state.selected>=state.rows.length-1;if(!r){$('#source-text').value='';$('#chinese-text').value='';$('#voice-text').value='';$('#voice-source').textContent=tr("识别并翻译后，即可逐句调整情绪。");renderEditingControls();return;}$('#selected-segment-label').textContent=tr("第 {0} 句 / 共 {1} 句",r.id,state.rows.length);$('#selected-segment-time').textContent=`${clock(r.start)} — ${clock(r.end)} · ${roleOptionText(r.speaker)}`;$('#source-text').value=r.text;$('#chinese-text').value=r.zh;$('#voice-text').value=r.zh;$('#voice-source').textContent=r.text;$('#segment-start').value=r.start;$('#segment-end').value=r.end;$('#segment-speaker').innerHTML=roleOptions(projectSpeakers(),r.speaker);$('#segment-speaker').value=r.speaker;$('#emotion-select').value=r.emotion||'inherit';$('#emotion-strength').value=r.emotion_strength||'medium';$('#source-text').setAttribute('aria-label',tr("第 {0} 句原文",r.id));$('#chinese-text').setAttribute('aria-label',tr("第 {0} 句译文",r.id));$('#emotion-help').textContent=(r.emotion||'inherit')==='inherit'?tr("使用参考声音的自然表达，不额外指定情绪。"):tr("只调整当前句的表达，音色仍使用该角色的参考声音。");renderEditingControls();renderAudition();window.SubtitleTools?.render();}
 function renderEmotionOptions(){const value=$('#emotion-select').value;$('#emotion-select').innerHTML=Object.entries(emotions).map(([id,name])=>`<option value="${id}">${esc(tr(name))}</option>`).join('');$('#emotion-select').value=value||'inherit';}
 function edit(field,value){const r=currentRow();if(!r)return;if(['text','zh','start','end','speaker'].includes(field)&&r[field]!==value)SubtitleEditing.clearMark(r);r[field]=value;if(field==='emotion'&&value==='inherit'){delete r.emotion;delete r.emotion_strength;}else if(field==='emotion'&&!r.emotion_strength)r.emotion_strength='medium';setDirty(true);renderEditingControls();}
@@ -87,10 +93,16 @@ async function run(stage){return projectActions.task('run:'+stage,async token=>{
 await api(`/api/projects/${token.id}/run/${stage}`,{method:'POST'});
 if(!projectActions.current(token))return;
 await refreshCurrent(true);if(!projectActions.current(token))return;
-switchTab(['analyze','resegment','retranscribe','check_asr'].includes(stage)?'source':['translate','optimize'].includes(stage)?'subtitles':['export','preview'].includes(stage)?'export':stage==='all'?state.tab:'voices');
+switchTab(['analyze','resegment','retranscribe','check_asr'].includes(stage)?'source':['translate','optimize','retranslate_all'].includes(stage)?'subtitles':['export','preview'].includes(stage)?'export':stage==='all'?state.tab:'voices');
 },{audio:true});}
-['all','analyze','translate','dub','export','preview','optimize'].forEach(stage=>$('#run-'+stage).onclick=()=>guard(()=>run(stage)));
-$('#run-resegment').onclick=()=>guard(async()=>{if(state.project.segments.length&&await confirmChoice(tr("将复用上次识别的原词和时间戳重新断句，不调用当前识别模型。现有字幕、译文和成片先备份。"),{title:tr("重新断句"),proceed:tr("备份并重新断句")})==='cancel')return;await run('resegment');});$('#cancel-job').onclick=()=>guard(async()=>{await api(`/api/projects/${state.id}/cancel`,{method:'POST'});await refreshCurrent();});
+['all','analyze','translate','dub','export','preview','optimize','retranslate_all'].forEach(stage=>$('#run-'+stage).onclick=()=>guard(()=>run(stage)));
+async function runResegment(){
+  const token=projectActions.context();
+  if(state.project.segments.length&&await confirmChoice(tr("将复用上次识别的原词和时间戳重新断句，不调用当前识别模型。现有字幕、译文和成片先备份。"),{title:tr("重新断句"),proceed:tr("备份并重新断句")})==='cancel')return;
+  if(projectActions.current(token))await run('resegment');
+}
+$('#run-resegment').onclick=()=>guard(runResegment);
+$('#cancel-job').onclick=()=>guard(async()=>{await api(`/api/projects/${state.id}/cancel`,{method:'POST'});await refreshCurrent();});
 async function runAudition(video=false){const row=currentRow();if(!row?.zh?.trim())throw Error(tr("先填写这句的译文配音稿"));const id=state.id,version=state.selectionVersion;const result=await api(`/api/projects/${id}/audition`,json('POST',{segment:clone(row),revision:state.editorRevision,video}));if(id!==state.id||version!==state.selectionVersion)return;state.auditionPending={project:id,request:result.request_id};await refreshCurrent(false);toast(video?tr("正在生成本句视频预览，当前草稿不会替换成片"):tr("正在生成本句原速试听，当前草稿不会替换成片"));}
 $('#run-audition').onclick=()=>guard(runAudition);
 function expressionSignature(r){return JSON.stringify([r?.id,String(r?.zh||'').trim(),String(r?.speaker||'').trim(),r?.emotion||'inherit',(r?.emotion||'inherit')==='inherit'?'medium':r?.emotion_strength||'medium']);}
@@ -140,9 +152,9 @@ async function openImport(){$('#import-error').textContent='';$('#import-dialog'
 $('#import-form').onsubmit=async e=>{e.preventDefault();const b=$('#import-submit');b.disabled=true;b.setAttribute('aria-busy','true');b.textContent=tr("正在导入视频…");$('#import-error').textContent='';try{const form=new FormData(e.target),video=form.get('video');let p;if(video&&video.size){form.delete('path');p=await api('/api/projects/upload',{method:'POST',body:form});}else{const value=Object.fromEntries(form);delete value.video;p=await api('/api/projects/import',json('POST',value));}$('#import-dialog').close();await selectProject(p.id);switchTab('source');}catch(error){$('#import-error').textContent=error.message;}finally{b.disabled=false;b.setAttribute('aria-busy','false');b.textContent=tr("创建项目");}};
 async function srtUpload(input,kind){if(!input.files[0])return;if(state.dirty&&await confirmChoice(tr("导入会替换当前字幕，并放弃未保存的校对。"),{title:tr("导入字幕"),proceed:tr("导入并替换")})==='cancel'){input.value='';return;}const id=state.id,version=state.selectionVersion,body=new FormData();body.append('subtitle',input.files[0]);body.append('kind',kind);await api(`/api/projects/${id}/subtitles`,{method:'POST',body});if(id!==state.id||version!==state.selectionVersion)return;setDirty(false);input.value='';await refreshCurrent(true);switchTab('subtitles');toast(tr("字幕已导入"));}$('#source-srt').onchange=()=>guard(()=>srtUpload($('#source-srt'),'source'));$('#chinese-srt').onchange=()=>guard(()=>srtUpload($('#chinese-srt'),'zh'));
 async function openSettings(){if(state.settingsLoaded){showSection('settings');return;}const s=await api('/api/settings');state.settings=s;Object.entries(s).forEach(([k,v])=>{const el=$('#settings-form').elements[k];if(el)el.value=v;});$('#settings-error').textContent='';state.settingsLoaded=true;state.settingsDirty=false;showSection('settings');updateSettingsDraft();}$('#open-settings').onclick=()=>guard(openSettings);$('#environment-settings').onclick=()=>guard(openSettings);
-$('#settings-form').onsubmit=async e=>{e.preventDefault();try{const data={...state.settings,...Object.fromEntries(new FormData(e.target))};['max_speed','max_lead','max_lag','alignment_fallback_speed','alignment_fallback_lead','alignment_fallback_lag','audio_workers','tts_batch_size','tts_idle_minutes','translation_batch'].forEach(k=>data[k]=Number(data[k]));data.translation_compact=[true,'true'].includes(data.translation_compact);data.tts_keep_loaded=[true,'true'].includes(data.tts_keep_loaded);state.settings=await api('/api/settings',json('PUT',data));state.settingsDirty=false;updateSettingsDraft();await diagnostics();toast(tr("设置已保存，下次任务生效"));}catch(error){$('#settings-error').textContent=error.message;}};
+$('#settings-form').onsubmit=async e=>{e.preventDefault();try{const data={...state.settings,...Object.fromEntries(new FormData(e.target))};['max_speed','max_lead','max_lag','alignment_fallback_speed','alignment_fallback_lead','alignment_fallback_lag','audio_workers','tts_batch_size','tts_idle_minutes','translation_batch','translation_parallel'].forEach(k=>data[k]=Number(data[k]));data.translation_compact=[true,'true'].includes(data.translation_compact);data.tts_keep_loaded=[true,'true'].includes(data.tts_keep_loaded);state.settings=await api('/api/settings',json('PUT',data));state.settingsDirty=false;updateSettingsDraft();await diagnostics();toast(tr("设置已保存，下次任务生效"));}catch(error){$('#settings-error').textContent=error.message;}};
 window.addEventListener('beforeunload',e=>{if(state.dirty||state.audioDirty){e.preventDefault();e.returnValue='';}});
-async function poll(){if(state.poll)return;state.poll=true;try{await refreshCurrent();await refreshList();await refreshTtsSession();}catch{$('#job-status').textContent=tr("连接本地服务中…");}finally{state.poll=false;}}
+async function poll(){if(state.poll)return;state.poll=true;try{await refreshCurrent();await showProposal(false);await refreshList();await refreshTtsSession();}catch{$('#job-status').textContent=tr("连接本地服务中…");}finally{state.poll=false;}}
 
 function renderTtsRuntime(){
   const r=state.project?.tts_runtime;$('#tts-runtime').hidden=!r;if(!r)return;
@@ -154,65 +166,155 @@ function renderTtsRuntime(){
   if(r.phase==='合成完成'&&r.seconds!=null){const other=Math.max(0,r.seconds-Object.values(r.stage_seconds||{}).reduce((a,b)=>a+Number(b),0));phases.push(tr("其他准备与读写 {0} 秒",other.toFixed(1)));}
   $('#tts-timing').textContent=[r.model_reused?tr("模型已复用，无需重新加载"):r.model_load_seconds!=null?tr("模型加载 {0} 秒",Number(r.model_load_seconds).toFixed(1)):'',r.model_load_reason?tr("加载原因：{0}",tr(r.model_load_reason)):'',...phases,r.seconds!=null?tr("合成累计 {0} 秒",Number(r.seconds).toFixed(1)):'',r.peak_allocated_mb?tr("PyTorch 峰值 {0} GiB",(r.peak_allocated_mb/1024).toFixed(1)):''].filter(Boolean).join(' · ');
 }
+function proposalMeta(){
+  const p=state.project,preview=p?.translation_preview;
+  return preview?.base_revision===(p?.edit_revision||0)?preview:p?.translation_proposal;
+}
+function proposalVersion(meta){
+  return meta?JSON.stringify([meta.id,meta.status,meta.done,state.project?.edit_revision]):null;
+}
+function inlineRetranslation(row){
+  const meta=proposalMeta(),proposal=state.proposal;
+  if(meta?.kind!=='retranslate_all'||meta.status==='applied'||proposal?.id!==meta.id||proposal.stale||
+      proposal.base_revision!==(state.project.edit_revision||0))return null;
+  const item=state.proposalItemsById?.get(row.id);
+  return item&&item.source===row.text&&item.before===row.zh&&item.after!==item.before?item:null;
+}
+function loadProposalEdits(id){
+  const key='btv-translation-edits:'+state.id+':'+id;
+  if(state.proposalEditKey===key)return;
+  state.proposalEditKey=key;state.proposalEdits={};
+  try{
+    const saved=JSON.parse(localStorage.getItem(key)||'{}');
+    if(saved&&typeof saved==='object'&&!Array.isArray(saved))state.proposalEdits=saved;
+  }catch{}
+}
+function saveProposalEdits(){
+  try{
+    if(Object.keys(state.proposalEdits).length)localStorage.setItem(state.proposalEditKey,JSON.stringify(state.proposalEdits));
+    else localStorage.removeItem(state.proposalEditKey);
+  }catch{}
+}
+function proposalEditText(item){
+  return item?(state.proposalEdits?.[item.id]??item.after):'';
+}
+function canEditProposal(){
+  const p=state.proposal,meta=proposalMeta();
+  return !!p?.allow_edits&&meta?.id===p.id&&meta.status==='ready'&&!active(state.project)&&!state.applyingProposal;
+}
+function proposalTextMarkup(item,inline=false){
+  const marker=inline?` data-retranslated-cue="${item.id}"`:'';
+  const text=esc(proposalEditText(item));
+  if(!state.proposal.allow_edits||item.before===item.after)return `<p dir="auto"${marker}>${text}</p>`;
+  return `<textarea dir="auto" rows="2" maxlength="6000" data-proposal-edit="${item.id}"${marker}
+      aria-label="${esc(tr('编辑第 {0} 句新译文',item.id))}" ${canEditProposal()?'':'disabled'}>${text}</textarea>`;
+}
 function renderProposalState(){
-  const p=state.project,m=p?.translation_proposal;
+  const p=state.project,m=proposalMeta(),partial=m===p?.translation_preview;
   $('#translation-review').hidden=!m;
   $('#run-optimize').disabled=active(p)||!p.segments.some(s=>s.zh);
   if(!m){state.proposal=null;return;}
   if(state.proposalProject!==state.id||state.proposal?.id!==m.id){
     state.proposal=null;state.proposalProject=state.id;state.proposalSelected=new Set();$('#proposal-body').hidden=true;
   }
-  $('#proposal-summary').textContent=m.status==='applied'?tr("所选建议已应用。请重新生成译制配音和成片；其余建议需重新审校。"):tr("已审校 {0} 段，其中 {1} 段有调整。原译文和成片尚未替换。",m.total,m.changed);
-  $('#show-proposal').disabled=active(p);
+  const retranslated=m.kind==='retranslate_all';
+  const loaded=state.proposalVersion===proposalVersion(m)?state.proposal:null;
+  for(const id of ['proposal-title','proposal-dialog-title']){
+    const title=$('#'+id);
+    title.dataset.i18n=retranslated?(id==='proposal-title'?'重新翻译结果':'重新翻译对比'):id==='proposal-title'?'译文优化建议':'译文优化对比';
+    title.textContent=tr(title.dataset.i18n);
+  }
+  $('#proposal-summary').textContent=partial?tr("已处理 {0} / {1} 段，可查看已生成的译文。",m.done,m.total):m.status==='applied'?tr("所选建议已应用。请重新生成译制配音和成片；其余建议需重新审校。"):retranslated?tr("已生成 {0} 条新译文，{1} 条待采用。",m.total-(m.failed||0),m.changed):tr("已审校 {0} 段，其中 {1} 段有调整。原译文和成片尚未替换。",m.total,m.changed);
+  if(loaded?.needs_retranslation)$('#proposal-summary').textContent=tr(
+    '保留 {0} 条新译文，{1} 条字幕已调整，需重新翻译。',loaded.total-(loaded.failed||0),loaded.needs_retranslation);
+  if(m.status==='ready'&&state.proposal?.allow_edits)$('#proposal-summary').textContent+=' '+tr('可直接编辑下方新译文，采用时一起保存。');
+  $('#show-proposal').disabled=active(p)&&!partial;
+  $('#show-proposal-label').dataset.i18n=partial?'查看已完成译文':'查看逐句对比';
+  $('#show-proposal-label').textContent=tr($('#show-proposal-label').dataset.i18n);
   if(state.proposal)updateProposalControls();
 }
-async function showProposal(){
-  const id=state.id,version=state.selectionVersion,meta=state.project.translation_proposal;
-  const proposal=await api(`/api/projects/${id}/translation-proposal`);
-  if(state.id!==id||state.selectionVersion!==version||state.project.translation_proposal?.id!==meta.id)return;
-  if(!proposal)throw Error(tr("尚未生成译文优化建议"));
+async function showProposal(open=true){
+  const id=state.id,version=state.selectionVersion,meta=proposalMeta(),key=proposalVersion(meta);
+  const dialog=$('#proposal-dialog'),inline=meta?.kind==='retranslate_all'&&meta.status!=='applied'&&state.section==='projects'&&state.tab==='subtitles';
+  if(!open&&!dialog.open&&!inline)return;
+  if(!meta||(!open&&state.proposal?.id===meta.id&&state.proposalVersion===key))return;
+  const request=state.proposalRequest=(state.proposalRequest||0)+1;
+  const proposal=await api(`/api/projects/${id}/translation-proposal`,{cache:'no-store'});
+  if(state.id!==id||state.selectionVersion!==version||state.proposalRequest!==request||
+      proposalVersion(proposalMeta())!==key||(!open&&!dialog.open&&!inline))return;
+  if(!proposal||proposal.id!==meta.id)return;
   if(state.proposal?.id!==proposal.id){
-    state.proposalSelected=new Set(proposal.items.filter(r=>r.before!==r.after).map(r=>r.id));state.proposalPage=0;
+    state.proposalPage=0;
   }
-  state.proposal=proposal;state.proposalProject=id;$('#proposal-body').hidden=false;renderProposalItems();if(!$('#proposal-dialog').open)$('#proposal-dialog').showModal();
+  const eligible=new Set(proposal.partial?[]:proposal.items.filter(r=>r.before!==r.after).map(r=>r.id));
+  state.proposalSelected=state.proposal?.id!==proposal.id||(state.proposal?.partial&&!proposal.partial)
+    ?eligible:new Set([...state.proposalSelected].filter(id=>eligible.has(id)));
+  state.proposal=proposal;state.proposalVersion=key;state.proposalProject=id;
+  loadProposalEdits(proposal.id);
+  if(meta.kind==='retranslate_all'){
+    state.proposalItemsById=new Map(proposal.items.map(item=>[item.id,item]));
+    if(state.section==='projects'&&state.tab==='subtitles')renderSentenceList();
+  }
+  renderProposalState();
+  if(open||dialog.open){$('#proposal-body').hidden=false;renderProposalItems();}
+  if(open&&!dialog.open)dialog.showModal();
 }
 function renderProposalItems(){
   const p=state.proposal;if(!p)return;
-  const items=p.items.filter(r=>r.before!==r.after||(r.checks||[]).some(check=>check.code==='translation_failed')),pages=Math.max(1,Math.ceil(items.length/12));
+  const items=p.partial?p.items:p.items.filter(r=>r.before!==r.after||(r.checks||[]).some(check=>check.code==='translation_failed')),pages=Math.max(1,Math.ceil(items.length/12));
   state.proposalPage=Math.max(0,Math.min(state.proposalPage||0,pages-1));
-  $('#proposal-items').innerHTML=items.slice(state.proposalPage*12,(state.proposalPage+1)*12).map(r=>tr("<article class=\"proposal-item\"><div class=\"proposal-item-title\"><label class=\"check-label\"><input type=\"checkbox\" data-proposal-id=\"{0}\" aria-label=\"采用第 {1} 段优化\" {2}>第 {3} 段</label><small class=\"subtle\">预计朗读 {4} 秒 / 字幕窗口 {5} 秒</small></div><p class=\"proposal-source\">{6}</p><div class=\"proposal-grid\"><div><b>当前译文</b><p>{7}</p></div><div class=\"proposal-after\"><b>优化建议</b><p>{8}</p></div></div><p class=\"subtle\">{9}</p></article>",r.id,r.id,r.before===r.after?'disabled':state.proposalSelected.has(r.id)?'checked':'',r.id,r.estimated_seconds,r.seconds,esc(r.source),esc(r.before),esc(r.after),esc([r.reason||tr("调整译文语序与表达；请结合原文核对。"),...(r.checks||[]).map(translationCheckText)].join(" ")))).join('')||tr("<p class=\"subtle\">本次审校没有需要修改的译文。</p>");
+  $('#proposal-items').innerHTML=items.slice(state.proposalPage*12,(state.proposalPage+1)*12).map(r=>tr("<article class=\"proposal-item\"><div class=\"proposal-item-title\"><label class=\"check-label\"><input type=\"checkbox\" data-proposal-id=\"{0}\" aria-label=\"采用第 {1} 段优化\" {2}>第 {3} 段</label><small class=\"subtle\">预计朗读 {4} 秒 / 字幕窗口 {5} 秒</small></div><p class=\"proposal-source\">{6}</p><div class=\"proposal-grid\"><div><b>当前译文</b><p>{7}</p></div><div class=\"proposal-after\"><b>优化建议</b>{8}</div></div><p class=\"subtle\">{9}</p></article>",r.id,r.id,r.before===r.after?'disabled':state.proposalSelected.has(r.id)?'checked':'',r.id,r.estimated_seconds,r.seconds,esc(r.source),esc(r.before),proposalTextMarkup(r),esc([r.reason||tr("调整译文语序与表达；请结合原文核对。"),...(r.checks||[]).map(translationCheckText)].join(" ")))).join('')||tr("<p class=\"subtle\">本次审校没有需要修改的译文。</p>");
   $$('[data-proposal-id]').forEach(input=>input.onchange=()=>{const id=Number(input.dataset.proposalId);if(input.checked)state.proposalSelected.add(id);else state.proposalSelected.delete(id);updateProposalControls();});
   $('#proposal-page').textContent=`${state.proposalPage+1} / ${pages}`;
+  if(p.partial&&!items.length)$('#proposal-items').textContent=tr("首批译文生成后会显示在这里。");
   $('#proposal-prev').disabled=state.proposalPage===0;$('#proposal-next').disabled=state.proposalPage>=pages-1;
   updateProposalControls();
 }
 function updateProposalControls(){
   const p=state.proposal;if(!p)return;
-  const meta=state.project.translation_proposal,stale=p.stale||meta?.status!=='ready'||p.base_revision!==(state.project.edit_revision||0);
+  const meta=state.project.translation_proposal,stale=p.stale||meta?.id!==p.id||meta?.status!=='ready'||p.base_revision!==(state.project.edit_revision||0);
   const total=p.items.filter(r=>r.before!==r.after).length,count=state.proposalSelected.size;
   const applied=meta?.status==='applied',busy=!!state.applyingProposal;
-  $('#proposal-selected').textContent=applied?tr("所选建议已应用"):stale?tr("建议已过期，请重新生成。"):tr("已选择 {0} / {1} 段",count,total);
+  const empty=[...state.proposalSelected].some(id=>state.proposalEdits?.[id]?.trim()==='');
+  $('#proposal-selected').textContent=p.partial?tr("已显示 {0} / {1} 段",p.items.length,p.total):applied?tr("所选建议已应用"):stale?tr("建议已过期，请重新生成。"):tr("已选择 {0} / {1} 段",count,total);
   $('#proposal-all').checked=total>0&&count===total;$('#proposal-all').indeterminate=count>0&&count<total;
   $('#proposal-all').disabled=stale||active(state.project)||state.applyingProposal;
   $$('[data-proposal-id]').forEach(input=>input.disabled=stale||active(state.project)||state.applyingProposal);
-  $('#apply-proposal').disabled=stale||!count||state.dirty||active(state.project)||state.applyingProposal;
+  $$('[data-proposal-edit]').forEach(input=>input.disabled=!canEditProposal());
+  $('#apply-proposal').disabled=stale||!count||empty||state.dirty||active(state.project)||state.applyingProposal;
   const button=$('#apply-proposal');
-  button.textContent=busy?tr("正在应用…"):applied?tr("已应用"):stale?tr("建议已过期"):tr("应用所选优化（{0}）",count);
+  button.hidden=!!p.partial;
+  button.textContent=busy?tr("正在应用…"):applied?tr("已应用"):stale?tr("建议已过期"):tr(meta?.kind==='retranslate_all'?"应用所选译文（{0}）":"应用所选优化（{0}）",count);
   button.setAttribute('aria-busy',String(busy));
   const hint=busy?tr("正在保存所选译文，请稍候。"):active(state.project)?tr("当前项目正在处理，完成后可应用建议。"):applied?tr("已应用成功。点击“一键完成”重新生成译制配音和成片。"):stale?tr("字幕已经更新，请重新生成优化建议。"):state.dirty?tr("有未保存的校对，请先保存；译文发生变化后需重新生成建议。"):!count?tr("请先勾选需要采用的优化建议。"):tr("应用后需重新生成译制配音和成片；未修改片段可复用。");
   button.title=hint;
-  $('#proposal-action-hint').textContent=hint;
+  $('#proposal-action-hint').textContent=p.partial?tr(active(state.project)?"候选会自动刷新，完整任务结束后可勾选采用。":"用相同设置再次开始重新翻译，可复用已完成候选。"):empty?tr('请填写空白的新译文，或取消选择对应句子。'):hint;
 }
+document.addEventListener('input',event=>{
+  const input=event.target;
+  if(!input.matches('[data-proposal-edit]')||!canEditProposal())return;
+  const item=state.proposalItemsById?.get(Number(input.dataset.proposalEdit));
+  if(!item)return;
+  if(input.value===item.after)delete state.proposalEdits[item.id];
+  else state.proposalEdits[item.id]=input.value;
+  if(input.closest('#segment-list'))growTextarea(input);
+  saveProposalEdits();state.subtitleKey=null;updateProposalControls();
+});
+$('#proposal-dialog').addEventListener('close',()=>{if(state.tab==='subtitles')renderSentenceList();});
 $('#show-proposal').onclick=()=>guard(showProposal);
 $('#proposal-all').onchange=()=>{state.proposalSelected=$('#proposal-all').checked?new Set(state.proposal.items.filter(r=>r.before!==r.after).map(r=>r.id)):new Set();renderProposalItems();};
 $('#proposal-prev').onclick=()=>{state.proposalPage--;renderProposalItems();};
 $('#proposal-next').onclick=()=>{state.proposalPage++;renderProposalItems();};
 $('#apply-proposal').onclick=()=>guard(async()=>{
   if(state.dirty)throw Error(tr("请先保存校对，再重新生成建议，避免覆盖未保存的内容"));
-  const id=state.id,proposal=state.proposal;state.applyingProposal=true;updateProposalControls();
+  const id=state.id,proposal=state.proposal,ids=[...state.proposalSelected];
+  const edits=Object.fromEntries(ids.filter(key=>Object.hasOwn(state.proposalEdits,key)).map(key=>[key,state.proposalEdits[key]]));
+  state.applyingProposal=true;updateProposalControls();
   try{
-    await api(`/api/projects/${id}/translation-proposal/apply`,json('POST',{proposal_id:proposal.id,revision:proposal.base_revision,ids:[...state.proposalSelected]}));
-    if(state.id!==id)return;
+    await api(`/api/projects/${id}/translation-proposal/apply`,json('POST',{proposal_id:proposal.id,revision:proposal.base_revision,ids,edits}));
+    if(state.id!==id||state.proposal?.id!==proposal.id)return;
+    for(const key of ids)delete state.proposalEdits[key];
+    saveProposalEdits();
     await refreshCurrent(true);$('#proposal-dialog').close();toast(tr("所选优化已应用，请重新生成译制配音和成片；未修改片段继续复用"));
   }finally{state.applyingProposal=false;if(state.id===id)updateProposalControls();}
 });
@@ -236,7 +338,8 @@ $('#ui-language').onchange=()=>{
   state.outputRenderKey=null;state.voiceKey=null;
   renderProjectList();
   if(state.project){renderSentenceList();renderEditors();render(false);}
-  else $('#page-name').textContent=tr(tr("项目首页"));
+  else showSection(state.section);
+  if(state.section==='game-voices')refreshGameLanguage();
   if(state.proposal)renderProposalItems();
   guard(async()=>{await diagnostics();await refreshTtsSession();});
 };

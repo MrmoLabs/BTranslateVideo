@@ -1,5 +1,5 @@
 """Validated local emotion presets shared by the editor, cache keys and TTS worker."""
-PRESETS={'inherit':'沿用参考音','happy':'开心','angry':'愤怒','sad':'悲伤','afraid':'害怕','disgusted':'厌恶','melancholic':'低落','surprised':'惊讶','calm':'平静'}
+PRESETS={'inherit':'沿用参考音','happy':'开心','angry':'愤怒','sad':'悲伤','afraid':'害怕','disgusted':'厌恶','melancholic':'低落','surprised':'惊讶','calm':'平静','source':'跟随本句原声'}
 STRENGTHS={'low':.35,'medium':.6,'high':.8}
 ORDER=('happy','angry','sad','afraid','disgusted','melancholic','surprised','calm')
 
@@ -15,9 +15,11 @@ def emotion_key(row):
 
 def emotion_vector(row):
     value=emotion_fields(row)
-    if not value:return None
+    if not value or value['emotion']=='source':return None
     return [STRENGTHS[value['emotion_strength']] if name==value['emotion'] else 0.0 for name in ORDER]
 
 def emotion_kwargs(row):
+    if row.get('emotion_reference'):
+        return dict(emo_audio_prompt=row['emotion_reference'],emo_alpha=STRENGTHS[row['emotion_strength']])
     vector=emotion_vector(row)
     return dict(emo_vector=vector,use_random=False) if vector else {}

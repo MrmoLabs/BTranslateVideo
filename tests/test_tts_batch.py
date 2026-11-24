@@ -30,7 +30,7 @@ def test_native_batch_failure_recovers_all_rows_and_disables_further_batches(tmp
     def infer(**kwargs):
         inferred.append(kwargs["text"])
         Path(kwargs["output_path"]).write_bytes(b"complete voice")
-    model = SimpleNamespace(cache_spk_audio_prompt="same.wav", cache_spk_cond=True, infer=infer)
+    model = SimpleNamespace(cache_spk_audio_prompt="same.wav", cache_spk_cond=True, cache_emo_audio_prompt="same.wav", cache_emo_cond=True, infer=infer)
     calls = []
     def fail(*_):
         calls.append(True)
@@ -48,7 +48,7 @@ def test_low_gpu_headroom_uses_serial_without_dropping_rows(tmp_path, monkeypatc
     cuda = SimpleNamespace(mem_get_info=lambda: (1024**3, 16 * 1024**3), memory_reserved=lambda: 0, memory_allocated=lambda: 0, synchronize=lambda: None, max_memory_allocated=lambda: 0)
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=cuda))
     def infer(**kwargs): Path(kwargs["output_path"]).write_bytes(b"voice")
-    model = SimpleNamespace(cache_spk_audio_prompt="same.wav", cache_spk_cond=True, infer=infer)
+    model = SimpleNamespace(cache_spk_audio_prompt="same.wav", cache_spk_cond=True, cache_emo_audio_prompt="same.wav", cache_emo_cond=True, infer=infer)
     monkeypatch.setattr(batch, "native_batch", lambda *_: (_ for _ in ()).throw(AssertionError("Must not batch with low headroom")))
     stats = batch.run_clips(model, rows, 2)
     assert stats["clips"] == 4 and stats["native_batches"] == 0
@@ -58,11 +58,41 @@ def fake_cuda(monkeypatch, free=8):
     cuda=SimpleNamespace(mem_get_info=lambda:(free*1024**3,16*1024**3),memory_reserved=lambda:0,memory_allocated=lambda:0,empty_cache=lambda:None,synchronize=lambda:None,max_memory_allocated=lambda:0)
     monkeypatch.setitem(sys.modules,'torch',SimpleNamespace(cuda=cuda))
 
+
+def test_source_emotion_uses_separate_reference_and_rewarms_before_batching(tmp_path, monkeypatch):
+    fake_cuda(monkeypatch)
+    rows = clips(tmp_path)
+    rows[0].update(emotion='source', emotion_strength='low', emotion_reference='source-line.wav')
+    model = SimpleNamespace(cache_spk_audio_prompt='same.wav', cache_spk_cond=True,
+                            cache_emo_audio_prompt='same.wav', cache_emo_cond=True)
+    singles = []
+    batches = []
+
+    def infer(**kwargs):
+        singles.append(kwargs)
+        model.cache_emo_audio_prompt = kwargs.get('emo_audio_prompt', kwargs['spk_audio_prompt'])
+        Path(kwargs['output_path']).write_bytes(b'voice')
+
+    def native(current, group):
+        assert current.cache_emo_audio_prompt == 'same.wav'
+        batches.append([clip['id'] for clip in group])
+        for clip in group:
+            Path(clip['output']).write_bytes(b'voice')
+
+    model.infer = infer
+    monkeypatch.setattr(batch, 'native_batch', native)
+    batch.run_clips(model, rows, 4)
+    assert singles[0]['spk_audio_prompt'] == 'same.wav'
+    assert singles[0]['emo_audio_prompt'] == 'source-line.wav'
+    assert singles[0]['emo_alpha'] == .35
+    assert 'emo_audio_prompt' not in singles[1]
+    assert len(singles) == 2 and batches == [[2, 3]]
+
 def test_cold_three_clips_warm_only_one_then_batch_two(tmp_path,monkeypatch):
     fake_cuda(monkeypatch);rows=clips(tmp_path)[:3];singles=[];batches=[]
-    model=SimpleNamespace(cache_spk_audio_prompt=None,cache_spk_cond=None)
+    model=SimpleNamespace(cache_spk_audio_prompt=None,cache_spk_cond=None,cache_emo_audio_prompt=None,cache_emo_cond=None)
     def infer(**kw):
-        singles.append(kw['text']);model.cache_spk_audio_prompt=kw['spk_audio_prompt'];model.cache_spk_cond=True;Path(kw['output_path']).write_bytes(b'voice')
+        singles.append(kw['text']);model.cache_spk_audio_prompt=kw['spk_audio_prompt'];model.cache_spk_cond=True;model.cache_emo_audio_prompt=kw['spk_audio_prompt'];model.cache_emo_cond=True;Path(kw['output_path']).write_bytes(b'voice')
     model.infer=infer
     def native(_model,group):
         batches.append([c['id'] for c in group])
@@ -74,7 +104,7 @@ def test_cold_three_clips_warm_only_one_then_batch_two(tmp_path,monkeypatch):
 
 def test_batch_four_failure_retries_as_two_without_disabling_all_batches(tmp_path,monkeypatch):
     fake_cuda(monkeypatch);rows=clips(tmp_path);sizes=[]
-    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,infer=lambda **_: (_ for _ in ()).throw(AssertionError('should batch')))
+    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,cache_emo_audio_prompt='same.wav',cache_emo_cond=True,infer=lambda **_: (_ for _ in ()).throw(AssertionError('should batch')))
     def native(_model,group):
         sizes.append(len(group))
         if len(group)==4:raise RuntimeError('CUDA out of memory')
@@ -87,7 +117,7 @@ def test_batch_four_failure_retries_as_two_without_disabling_all_batches(tmp_pat
 def test_unsupported_text_only_falls_back_for_that_clip(tmp_path,monkeypatch):
     fake_cuda(monkeypatch);rows=clips(tmp_path);singles=[];batches=[]
     def infer(**kw):singles.append(kw['text']);Path(kw['output_path']).write_bytes(b'voice')
-    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,infer=infer)
+    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,cache_emo_audio_prompt='same.wav',cache_emo_cond=True,infer=infer)
     def native(_model,group):
         if group[0]['id']==0:raise batch.NotBatchable('long token sequence')
         batches.append([c['id'] for c in group])
@@ -99,7 +129,7 @@ def test_unsupported_text_only_falls_back_for_that_clip(tmp_path,monkeypatch):
 def test_unsupported_middle_text_does_not_force_other_rows_to_serial(tmp_path,monkeypatch):
     fake_cuda(monkeypatch);rows=clips(tmp_path);singles=[];batches=[]
     def infer(**kw):singles.append(kw['output_path']);Path(kw['output_path']).write_bytes(b'voice')
-    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,infer=infer)
+    model=SimpleNamespace(cache_spk_audio_prompt='same.wav',cache_spk_cond=True,cache_emo_audio_prompt='same.wav',cache_emo_cond=True,infer=infer)
     def native(_model,group):
         if any(c['id']==2 for c in group):
             exc=batch.NotBatchable('requires splitting');exc.output=rows[2]['output'];raise exc

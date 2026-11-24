@@ -7,12 +7,16 @@ import json
 from pathlib import Path
 from .file_io import atomic_json
 
-RUNTIME_FIELDS=frozenset({'status','stage','progress','processing','error','logs','tts_runtime','subtitle_review','updated'})
+RUNTIME_FIELDS=frozenset({'status','stage','progress','processing','error','logs','tts_runtime','subtitle_review','translation_preview','updated'})
 
 
 class ProjectStateFiles:
     def __init__(self):
         self.cache=OrderedDict();self.cached_bytes=0
+
+    def forget(self,path):
+        previous=self.cache.pop(Path(path),None)
+        if previous:self.cached_bytes-=previous[3]
 
     def _base(self,path):
         stat=path.stat();key=(stat.st_mtime_ns,stat.st_size,stat.st_ino)
@@ -46,8 +50,7 @@ class ProjectStateFiles:
             # digest no longer matches, so a crash between writes cannot apply
             # old task data to newly edited content.
             atomic_json(path,data)
-            previous=self.cache.pop(path,None)
-            if previous:self.cached_bytes-=previous[3]
+            self.forget(path)
 
     def runtime(self,path):
         data,_=self.read(path)

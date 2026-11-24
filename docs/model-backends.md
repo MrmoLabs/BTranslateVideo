@@ -1,8 +1,8 @@
-# Configurable local model backends / 可配置本地模型接口
+# Configurable model backends / 可配置模型接口
 
 Open **Settings → Models and tools** (设置 → 模型与工具). Each stage has its own backend, model path or local base URL, model ID and cache revision. Switching backends retains the other fields. Saving affects subsequently queued tasks; running tasks retain their settings snapshot. Existing settings continue to select faster-whisper, automatic translation routing and IndexTTS.
 
-界面中的“检查连接与文件”使用当前草稿，不会保存设置、加载模型、发送视频或参考音。它检查本地文件或读取服务的 `GET {base_url}/models`。服务可达或模型已列出，不等于推理、语言、音质已经验证。模型 ID 不在列表时，可从模型输入框的候选项选择；不提供列表的服务仍可手动填写 ID。
+界面中的“检查连接与文件”使用当前设置草稿。对于本地后端，它检查文件或读取服务的 `GET {base_url}/models`。服务可达或模型已列出时，仍需验证推理能力。选择 B 站官方翻译 API 时，程序会发送一条固定句子并校验返回的字幕编号和译文。
 
 ## Supported adapters
 
@@ -14,15 +14,14 @@ Open **Settings → Models and tools** (设置 → 模型与工具). Each stage 
 | Translation / segmentation | `auto` | Preserve the legacy rule: use `translation_url` if supplied, otherwise manage local llama.cpp. |
 | Translation / segmentation | `llama_cpp` | Manage local `llama-server` and `translation_model` GGUF, even if a retained service URL exists. |
 | Translation / segmentation | `openai` | `translation_url`, `translation_name`; local `/chat/completions`. Disable JSON response mode if the server rejects `response_format`; prompts and returned JSON are still validated. |
+| Translation / segmentation | `bilibili` | Official Bilibili preset at `https://index-translate.bilibili.com/v1`, model `Index-Translate-35B-A3B`. The API receives subtitle text, context and glossary terms when selected. |
 | Speech | `indextts` | Existing IndexTTS 2 / 2.5 environment, local model path, cloning, emotions, batching and warm residency. |
 | Speech | `openai_speech` | `tts_url`, `tts_name`, `tts_voice`; `/audio/speech` returning WAV. One configured service voice for all speakers. No reference upload, cloning or emotion controls. |
 | Speech | `btv_reference` | A local bridge implementing the BTV v1 contract below. Sends reference audio and explicit emotion to the bridge. Requires a server adapter; arbitrary TTS servers do not implement this automatically. |
 
 服务地址是 **base URL**，不是完整方法地址。例如 `http://127.0.0.1:8000/v1`；程序追加 `/audio/speech`、`/audio/transcriptions`、`/chat/completions` 或 `/models`。桥接若部署在 `/v1`，程序向 `/v1/synthesize` 发请求。
 
-Only loopback HTTP (`127.0.0.1`, `localhost`, `::1`) is accepted. URLs cannot contain credentials, query parameters or fragments. Requests ignore environment proxies and do not follow redirects. This release does not support authenticated service endpoints. Start your local model server separately: BTranslateVideo neither starts/stops it nor changes its loaded models. The server controls batching, residency and GPU allocation; built-in IndexTTS batch/idle settings apply only to IndexTTS. The request timeout setting applies to service transcription and speech.
-
-本程序只向本机地址发送请求；外部本地服务是否进一步联网取决于服务本身。完全本地使用时，应在服务中选择本地权重并关闭云端转发。不要将“本地服务地址”理解成对服务内部执行方式的验证。
+Custom service URLs accept loopback HTTP (`127.0.0.1`, `localhost`, `::1`) without credentials, query parameters or fragments. Local requests ignore system and environment proxies. The Bilibili preset uses its fixed HTTPS endpoint and respects the configured proxy. HTTP model requests do not follow redirects. Start local model servers separately. They manage batching, residency and GPU allocation, while built-in IndexTTS batch and idle settings apply to native IndexTTS. The request timeout setting applies to service transcription and speech.
 
 For service-only operation, install the application dependencies (`uv sync --locked --group dev`) and provide FFmpeg/FFprobe, then run `uv run --no-sync python run.py`. Full `setup.ps1` model downloads are optional when all inference stages use existing local services; built-in background separation still needs its own files if selected.
 

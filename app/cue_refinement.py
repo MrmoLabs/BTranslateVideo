@@ -6,7 +6,7 @@ import re
 from .languages import target_code
 from .media import check_cancel,extract_audio
 from .model_backends import chat_payload
-from .translation import _post_cancellable,local_translator
+from .translation import _post_cancellable,local_translator,translation_http_options
 from .translation_quality import _request,translation_context
 from .translation_checks import numbers
 
@@ -27,8 +27,9 @@ def corrected_source(url,settings,project,row,context,cancel):
     error=None
     for attempt in range(3):
         check_cancel(cancel)
-        payload=dict(model=settings.translation_name,messages=[dict(role='system',content=system),dict(role='user',content=json.dumps(data,ensure_ascii=False)+('\n上次结果无效，请返回非空 text 和 reason。' if error else '')+'\n/no_think')],temperature=.1,max_tokens=1800,stream=False,response_format={'type':'json_object'},chat_template_kwargs={'enable_thinking':False})
-        response=asyncio.run(_post_cancellable(url+'/chat/completions',chat_payload(settings,payload),cancel));response.raise_for_status()
+        payload=dict(model=settings.translation_model_id,messages=[dict(role='system',content=system),dict(role='user',content=json.dumps(data,ensure_ascii=False)+('\n上次结果无效，请返回非空 text 和 reason。' if error else '')+'\n/no_think')],temperature=.1,max_tokens=1800,stream=False,response_format={'type':'json_object'},chat_template_kwargs={'enable_thinking':False})
+        response=asyncio.run(_post_cancellable(url+'/chat/completions',chat_payload(settings,payload),cancel,
+                                               **translation_http_options(settings, '校对原文')));response.raise_for_status()
         try:
             content=response.json()['choices'][0]
             if content.get('finish_reason')=='length':raise ValueError('校对输出超过长度限制')
@@ -46,7 +47,10 @@ def generate_candidate(pipeline,identifier,project,row,index,request,settings,ca
     pipeline.progress(identifier,'retranslate',0,'重新识别原声' if mode=='asr' else '结合上下文生成本句校对建议',dict(phase='asr_prepare' if mode=='asr' else 'cue_review'))
     pipeline.tts.release('为单句识别或校对释放显存')
     source=row['text'];reason='';checks=[]
-    context=translation_context(project['segments'],[index])
+    context=translation_context(project['segments'],[index],settings)
+    if mode=='shorten':
+        from .dubbing_translation import shorten_to_alignment
+        return shorten_to_alignment(project,row,context,settings,folder/'process.log',cancel)
     if mode=='asr':
         from .pipeline import offline_env
         from .model_backends import transcribe

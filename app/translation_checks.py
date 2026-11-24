@@ -182,6 +182,14 @@ def validate_values(rows,result,target_language='zh'):
         if missing:missing-=equivalent_clock_numbers(source,translated)
         if missing and target_language=='zh':missing-=equivalent_range_numbers(source,translated)
         if missing:raise TranslationValidationError(row['id'],f"缺失或改写数字：{', '.join(sorted(missing))}")
+        bounds = {'zh': (r'最多|至多|不超过', r'最少|至少|不少于'),
+                  'en': (r'\b(?:at most|up to|no more than|a maximum of)\b', r'\b(?:at least|no fewer than|no less than|a minimum of)\b'),
+                  'ja': (r'最大|上限|[0-9０-９一二三四五六七八九十]+\s*(?:回|個|人|件)?以下', r'最低|少なくとも|[0-9０-９一二三四五六七八九十]+\s*(?:回|個|人|件)?以上')}
+        if target_language in {'en','ja'}:
+            original_bound = tuple(bool(re.search(pattern,source)) for pattern in bounds['zh'])
+            translated_bound = tuple(bool(re.search(pattern,translated,re.I)) for pattern in bounds[target_language])
+            if sum(original_bound)==1 and translated_bound==original_bound[::-1] and original_bound[0]!=translated_bound[0]:
+                raise TranslationValidationError(row['id'],'译文颠倒了原文的数量上限和下限')
         if len(re.findall(r'[?？؟]',translated))<len(re.findall(r'[?？؟]',source)):
             raise TranslationValidationError(row['id'],'遗漏原文问句，所有问句必须完整翻译并保留问号')
         if uncertain:

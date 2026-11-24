@@ -99,7 +99,7 @@ function renderProjectExperience(){
   $('#use-source-script').disabled=busy||!state.rows.length;
   $('#export-source-txt').disabled=!state.rows.length||!!state.projectUnavailable;
   const languageWrap=$('#subtitle-language-details');languageWrap.hidden=transcribe;
-  for(const id of ['run-translate','run-optimize','export-translation-srt'])$('#'+id).hidden=transcribe;
+  for(const id of ['run-translate','run-retranslate_all','run-optimize','export-translation-srt'])$('#'+id).hidden=transcribe;
   const translationImport=$('#chinese-srt').closest('label');translationImport.hidden=transcribe;
   const mode=$('#review-mode');for(const option of mode.options)option.disabled=transcribe&&!['source','asr'].includes(option.value);
   if(transcribe&&mode.selectedOptions[0]?.disabled)mode.value='asr';

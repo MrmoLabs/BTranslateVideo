@@ -298,3 +298,18 @@ body.subtitle-workbench main{max-width:none}.subtitle-review-toolbar{position:st
 .project-role-bindings .card-heading{gap:6px;flex-wrap:wrap}.project-role-bindings .card-heading>.role-name-label{flex:1 1 90px}.project-role-bindings .card-heading>.role-delete-button{flex:none;font-size:11px;min-height:28px;padding:4px 7px;color:#994a42;border-color:#dec6c2}.project-role-bindings .card-heading>.badge{order:3;flex-basis:100%;width:max-content;max-width:max-content}
 
 .project-role-bindings .speaker-card>.card-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}.project-role-bindings .card-heading>.role-name-label{grid-column:1;grid-row:1;min-width:0}.project-role-bindings .card-heading>.role-delete-button{grid-column:2;grid-row:1}.project-role-bindings .card-heading>.badge{grid-column:1 / -1;grid-row:2;justify-self:start;max-width:100%}
+
+.translation-request-text{max-height:18rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--soft);border:1px solid var(--line);padding:12px;font-size:12px}
+#translation-request-picker{width:100%}
+
+.retranslated-subtitle{margin-bottom:8px;padding:8px 10px;border-inline-start:3px solid var(--accent);background:var(--soft);overflow-wrap:anywhere}.retranslated-subtitle b{font-size:11px;color:var(--muted)}.retranslated-subtitle p{margin:3px 0 0;color:var(--ink);white-space:pre-wrap}
+
+.table-pagination{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:6px;margin:0;padding:8px 0;font-size:12px}
+.table-pagination-top{margin-top:4px;scroll-margin-top:12px}
+.table-pagination-bottom{padding-bottom:0}
+.table-pagination button,.table-page-number input{min-height:34px;padding:4px 8px;font-size:12px}
+.table-page-number{display:flex;align-items:center;gap:5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.table-page-number input{width:62px;margin:0;text-align:center}
+/* The dubbing board pages are much taller than the viewport, so keep its pager
+   pinned while the reader scrolls rows; both the top and bottom pager stay usable. */
+.dubbing-board .table-pagination-top{position:sticky;top:0;z-index:6;background:#fff;padding-block:10px;border-bottom:1px solid var(--line)}

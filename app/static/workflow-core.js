@@ -30,7 +30,7 @@
   function mergeRuntime(project,packet){
     if(!project?.content_version||project.content_version!==packet.content_version)return null;
     const result={...project};
-    for(const key of ['status','stage','progress','processing','error','logs','tts_runtime','subtitle_review','updated','process_log','asr_next'])if(Object.hasOwn(packet,key))result[key]=packet[key];
+    for(const key of ['status','stage','progress','processing','error','logs','tts_runtime','subtitle_review','translation_preview','updated','process_log','asr_next'])if(Object.hasOwn(packet,key))result[key]=packet[key];
     return result;
   }
   function acceptsProject(current,incoming,revision=0){
@@ -47,6 +47,12 @@
     const rows=p.segments,outputs=p.outputs||{};
     const code=Array.isArray(rows)?(outputs.video||outputs.preview?'video_ready':outputs.audio?'audio_ready':rows.length&&rows.every(r=>r.zh?.trim())?'translation_ready':rows.length?'source_ready':'needs_source'):(p.workflow?.code||'needs_source');
     return ({needs_source:'等待识别',source_ready:goal(p)==='transcribe'?'原文字幕可导出':'原文已识别',translation_ready:'译文字幕可导出',audio_ready:'配音已生成',video_ready:'成片可下载'})[code]||'等待识别';
+  }
+  function canResumeSegmentation(project){
+    const job=project?.processing;
+    return ['failed','cancelled','interrupted'].includes(project?.status)
+      && ['analyze','resegment','retranscribe'].includes(job?.step)
+      && ['segmentation_model','segmentation'].includes(job?.phase);
   }
   function nextAction(p,rows,tab,voicesReady){
     if(!rows.length)return {stage:'analyze',label:'识别原文字幕'};
@@ -98,6 +104,6 @@
     const language=['zh','en','ja','es','ar'].includes(project.target_language)?project.target_language:'zh';
     return {text:blocks.join('\n'),filename:name+'.'+(kind==='source'?'original':language)+'.srt',count:blocks.length,skipped};
   }
-  root.ProjectWorkflow={stages,context,current,coordinator,mergeRuntime,acceptsProject,subtitleDownload,goal,initialTab,productLabel,nextAction,preciseTime,draftState};
+  root.ProjectWorkflow={stages,context,current,coordinator,mergeRuntime,acceptsProject,subtitleDownload,goal,initialTab,productLabel,canResumeSegmentation,nextAction,preciseTime,draftState};
   if(typeof module!=='undefined')module.exports=root.ProjectWorkflow;
 })(typeof window!=='undefined'?window:globalThis);

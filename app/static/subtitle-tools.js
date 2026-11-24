@@ -9,7 +9,11 @@ window.SubtitleTools=(()=>{
   const current=()=>dialog.open&&state.id===tool.id&&state.selectionVersion===tool.version&&state.editorGeneration===tool.generation;
   function check(){if(busy())throw Error(tr('请等待当前操作结束后再编辑。'));if(!current())throw Error(tr('字幕草稿已变化，请关闭并重新打开时间轴工具。'));}
   function invalidateMark(row){core.clearMark(row);}
-  function matches(row,filter){return !filter.startsWith('human-')||(row.review_status||'unreviewed')===filter.slice(6);}
+  function boundaryIssues(row){
+    const record=state.project?.boundary_checks?.[row.id];
+    return record?.source===row.text?record.issues.filter(issue=>!issue.next_id||state.rows.find(value=>value.id===issue.next_id)?.text===issue.next_source):[];
+  }
+  function matches(row,filter){return filter==='boundaries'?boundaryIssues(row).length>0:!filter.startsWith('human-')||(row.review_status||'unreviewed')===filter.slice(6);}
   function render(){
     if(!state.project)return;
     history.sync(historyKey(),state.rows);
@@ -22,6 +26,19 @@ window.SubtitleTools=(()=>{
       let badge=element.querySelector('.review-human-badge');
       if(!badge){badge=document.createElement('span');badge.className='badge review-human-badge';element.querySelector('.review-cue').append(badge);}
       badge.textContent=tr(names[row.review_status||'unreviewed']);badge.dataset.humanStatus=row.review_status||'unreviewed';
+      const boundary=boundaryIssues(row);
+      let notice=element.querySelector('.review-boundary-note');
+      if(boundary.length&&!notice){notice=document.createElement('small');notice.className='review-boundary-note';element.querySelector('.review-cue').append(notice);}
+      if(notice){
+        notice.hidden=!boundary.length;
+        notice.textContent=boundary.map(issue=>{
+          if(issue.code==='condition_cut')return tr('条件句可能接到第 {0} 句',issue.next_id);
+          if(issue.code==='english_continuation')return tr('英语句意可能接到第 {0} 句',issue.next_id);
+          if(issue.code==='asr_sentence_split')return tr('原声识别在第 {0} 句仍连续，请核对边界。',issue.next_id);
+          if(issue.code==='asr_terminal_punctuation')return tr('原声识别的句末标点为 {0}，请核对。',issue.punctuation);
+          return tr('本句可能跨越两个主题');
+        }).join(' · ');
+      }
       const more=element.querySelector('.cue-more>div');
       if(!more.querySelector('[data-subtitle-tools]'))more.insertAdjacentHTML('afterbegin',`<button type="button" data-subtitle-tools="${index}">${esc(tr('时间轴与拆合句'))}</button><label class="human-mark-label">${esc(tr('人工标记'))}<select data-human-mark="${row.id}" aria-label="${esc(tr('第 {0} 句人工标记',row.id))}">${Object.entries(names).map(([value,name])=>`<option value="${value}">${esc(tr(name))}</option>`).join('')}</select></label>`);
       const select=more.querySelector('[data-human-mark]');select.value=row.review_status||'unreviewed';select.disabled=busy();more.querySelector('[data-subtitle-tools]').disabled=busy();
@@ -69,13 +86,14 @@ window.SubtitleTools=(()=>{
     for(const [time,color] of [[start,'#12694e'],[end,'#12694e'],[Number($('#tools-split-time').value),'#b46d18']]){ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(x(time),0);ctx.lineTo(x(time),canvas.height);ctx.stroke();}
     if(audio.currentTime>0){ctx.strokeStyle='#171e25';ctx.beginPath();ctx.moveTo(x(wave.start+audio.currentTime),0);ctx.lineTo(x(wave.start+audio.currentTime),canvas.height);ctx.stroke();}
   }
-  async function open(index){
+  async function open(index, suggestedTime){
     if(busy())throw Error(tr('请等待当前操作结束后再编辑。'));const row=state.rows[index];if(!row)return;
     stopSourceCue();audio.pause();pendingSeek=null;tool.abort?.abort();tool.abort=new AbortController();
     Object.assign(tool,{id:state.id,version:state.selectionVersion,index,generation:state.editorGeneration,wave:null});
     $('#tools-title').textContent=tr('第 {0} 句 · 时间轴与拆合句',row.id);
     $('#tools-source').value=row.text;$('#tools-translation').value=row.zh;$('#tools-translation-label').hidden=!row.zh.trim();
-    for(const [id,value] of [['tools-start',row.start],['tools-end',row.end],['tools-split-time',Number(((row.start+row.end)/2).toFixed(3))]])$('#'+id).value=value;
+    const cut=Number.isFinite(suggestedTime)?suggestedTime:Number(((row.start+row.end)/2).toFixed(3));
+    for(const [id,value] of [['tools-start',row.start],['tools-end',row.end],['tools-split-time',cut]])$('#'+id).value=value;
     $('#tools-source').setSelectionRange(Math.floor(row.text.length/2),Math.floor(row.text.length/2));
     $('#tools-translation').setSelectionRange(Math.floor(row.zh.length/2),Math.floor(row.zh.length/2));
     $('#tools-status').textContent=tr('正在读取原声波形…');$('#tools-wave-range').textContent='';audio.removeAttribute('src');audio.load();

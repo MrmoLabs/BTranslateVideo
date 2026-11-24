@@ -91,7 +91,9 @@ $('#review-resume').onclick=()=>guard(async()=>{
   if(id===state.id&&version===state.selectionVersion)await refreshCurrent(false);
 });
 function renderReviewToolbar(){
-  document.body.classList.toggle('subtitle-workbench',state.section==='projects'&&state.tab==='subtitles'&&!!state.projectDetail);
+  const onProject=state.section==='projects'&&!!state.projectDetail;
+  document.body.classList.toggle('subtitle-workbench',onProject&&state.tab==='subtitles');
+  document.body.classList.toggle('dubbing-workbench',onProject&&state.tab==='voices');
   if(!state.project)return;ensureReviewProject();const meta=reviewMeta(),busy=active(state.project)||state.saving||subtitleReview.submitting||subtitleReview.applying;
   $('#review-selected-count').textContent=tr('已选 {0} 句（跨页保留）',subtitleReview.selected.size);
   $('#subtitle-review-toolbar').classList.toggle('has-selection',subtitleReview.selected.size>0);
@@ -174,4 +176,4 @@ const tabBeforeWorkbench=switchTab;switchTab=function(name){tabBeforeWorkbench(n
 
 window.addEventListener('beforeunload',event=>{if(subtitleReview.storageFailed&&Object.keys(subtitleReview.drafts).length){event.preventDefault();event.returnValue='';}});
 
-const growBeforeWorkbench=growTextarea;growTextarea=function(el){if(el.matches('[data-review-field],[data-candidate-field]')){el.style.height='0px';el.style.height=Math.max(56,el.scrollHeight+2)+'px';}else growBeforeWorkbench(el);};
+const growBeforeWorkbench=growTextarea;growTextarea=function(el){if(el.matches('[data-review-field],[data-candidate-field]')){el.style.height='0px';const min=parseFloat(getComputedStyle(el).minHeight)||56;el.style.height=Math.round(Math.max(min,el.scrollHeight+2))+'px';}else growBeforeWorkbench(el);};

@@ -20,7 +20,7 @@ sys.path.insert(0,str(ROOT))
 from app.config import Settings,load_settings,atomic_json
 from app.pipeline import Pipeline,offline_env
 from app.store import Store
-from app.model_backends import transcribe
+from app.model_backends import transcribe, uses_translation_service
 from app.translation import local_translator,translate_batch
 from app.translation_checks import numbers
 from app.media import wav_duration
@@ -85,7 +85,7 @@ def main():
     base=ROOT/'runtime/backend-checks'/time.strftime('%Y%m%d-%H%M%S');base.mkdir(parents=True,exist_ok=False)
     report=dict(schema=1,python=platform.python_version(),platform=platform.platform(),stages=[],
                 backends={key:getattr(settings,key+'_provider') for key in ('asr','translation','tts')},
-                models=dict(asr=settings.asr_model if settings.asr_provider=='faster_whisper' else settings.asr_name,translation=settings.translation_model if not settings.translation_url else settings.translation_name,tts=settings.index_model if settings.tts_provider=='indextts' else settings.tts_name),
+                models=dict(asr=settings.asr_model if settings.asr_provider=='faster_whisper' else settings.asr_name,translation=settings.translation_model_id if uses_translation_service(settings) else settings.translation_model,tts=settings.index_model if settings.tts_provider=='indextts' else settings.tts_name),
                 quality_notice='Structural success and numeric checks do not prove translation meaning, speaker similarity or naturalness. Listen/read with the authored reference. Synthetic voices are a reproducibility fixture, not real-world video quality coverage.')
     cancel=threading.Event();log=base/'process.log'
     def record(stage,run):

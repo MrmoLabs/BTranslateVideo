@@ -23,7 +23,12 @@ def source_audio_clip(store,identifier,segment_id,settings,*,start=None,end=None
     if end-start>300:raise ValueError('单次原声试听最多 5 分钟，请缩小时间范围')
     if project['media'].get('audio') is False:raise ValueError('原视频中没有可播放的音轨')
     actual_start=max(0,start-context);actual_end=min(duration,end+context)
-    folder=store.folder(identifier);source=folder/'source.media';stat=source.stat()
+    path = source_audio_range(store.folder(identifier), actual_start, actual_end, settings, threading.Event())
+    return path, actual_start, actual_end
+
+
+def source_audio_range(folder, actual_start, actual_end, settings, cancel):
+    source=folder/'source.media';stat=source.stat()
     identity=[1,stat.st_size,stat.st_mtime_ns,actual_start,actual_end,24000]
     key=hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
     cache=folder/'cache';cache.mkdir(exist_ok=True)
@@ -31,17 +36,17 @@ def source_audio_clip(store,identifier,segment_id,settings,*,start=None,end=None
     with FileLock(cache/('source-cue-'+key+'.lock'),timeout=20):
         if target.is_file():
             try:
-                if 0<wav_duration(target)<=actual_end-actual_start+.1:return target,actual_start,actual_end
+                if 0<wav_duration(target)<=actual_end-actual_start+.1:return target
             except (OSError,ValueError,EOFError,wave.Error):pass
         pending=cache/('source-cue-'+key+'-'+uuid.uuid4().hex+'.pending.wav')
         try:
-            extract_audio(source,pending,settings,cache/('source-cue-'+key+'.log'),threading.Event(),start=actual_start,duration=actual_end-actual_start)
+            extract_audio(source,pending,settings,cache/('source-cue-'+key+'.log'),cancel,start=actual_start,duration=actual_end-actual_start)
             if wav_duration(pending)<=0:raise ValueError('这一段没有可播放的原声音频，请调整时间后重试')
             current=source.stat()
             if (current.st_size,current.st_mtime_ns)!=(stat.st_size,stat.st_mtime_ns):raise ValueError('原视频已更新，请重新试听')
             os.replace(pending,target)
         finally:pending.unlink(missing_ok=True)
-    return target,actual_start,actual_end
+    return target
 
 
 def source_waveform(store, identifier, segment_id, settings, *, start=None, end=None):

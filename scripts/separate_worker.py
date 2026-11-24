@@ -10,16 +10,36 @@ import subprocess
 import sys
 
 from model_worker import block_network
+from app.file_io import write_progress
 
 
-def atomic_json(path, value):
-    path = Path(path)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, path)
+def separate_bandit(request):
+    import numpy as np
+    import soundfile as sf
+
+    sys.path.insert(0, request['runner'])
+    from bandit_infer import BanditSession
+
+    rate = 48000
+    if not 0 < request['duration'] <= 120:
+        raise ValueError('BandIt 适用于 120 秒以内的游戏混音资源')
+    decoded = subprocess.run([request['ffmpeg'], '-hide_banner', '-nostdin', '-loglevel', 'error', '-i', request['source'],
+        '-ac', '2', '-ar', str(rate), '-f', 'f32le', 'pipe:1'], capture_output=True, check=True)
+    samples = np.frombuffer(decoded.stdout, dtype='<f4').reshape(-1, 2).T.copy()
+    with BanditSession('v2-multi', device='auto', checkpoint_path=Path(request['model']),
+                       checkpoint_sha256=request['weights_sha256']) as model:
+        stems = model.infer(samples, sample_rate=rate)
+    background = (stems['music'] + stems['effects']).T
+    output = Path(request['output'])
+    pending = output.with_suffix('.pending.flac')
+    sf.write(pending, background, rate, format='FLAC', subtype='PCM_24')
+    os.replace(pending, output)
+    write_progress(request['progress'], dict(frames=len(background), total=len(background), model='BandIt v2'))
 
 
 def separate(request):
+    if request.get('backend') == 'bandit':
+        return separate_bandit(request)
     import numpy as np
     import soundfile as sf
     import torch
@@ -84,7 +104,7 @@ def separate(request):
                     if keep:
                         write(bed[:-keep]); tail = bed[-keep:].copy()
                     else: tail = None
-                    atomic_json(request["progress"], dict(frames=written, total=target_frames, device=device))
+                    write_progress(request["progress"], dict(frames=written, total=target_frames, device=device))
                     print(f"BACKGROUND {written}/{target_frames}", flush=True)
                     extra = read_frames(block_frames - overlap_frames)
                     if not len(extra):
@@ -95,7 +115,7 @@ def separate(request):
                     write(np.zeros((min(rate, target_frames - written), channels), dtype=np.float32))
             if decoder.wait(timeout=20): raise RuntimeError("原音轨解码失败，请查看背景分离日志")
             os.replace(pending, output)
-            atomic_json(request["progress"], dict(frames=target_frames, total=target_frames, device=device))
+            write_progress(request["progress"], dict(frames=target_frames, total=target_frames, device=device))
             print("BACKGROUND complete", flush=True)
         finally:
             if decoder.poll() is None:

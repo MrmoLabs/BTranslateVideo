@@ -208,7 +208,7 @@ def run_review(pipeline,identifier,settings,cancel):
             audio_available=project.get('media',{}).get('audio') is not False and ((folder/'source.media').is_file() or (folder/'cache/source-16k.wav').is_file())
 
             def generate(i,url,audio_source=None):
-                row=rows[i];mode=review['items'][str(i)]['mode'];context=translation_context(project['segments'],[indices[i]])
+                row=rows[i];mode=review['items'][str(i)]['mode'];context=translation_context(project['segments'],[indices[i]],settings)
                 source=audio_source or row['text'];reason='';checks=[]
                 if audio_source:
                     if re.search(r'[?？]\s*$',row['text']) and not re.search(r'[?？]',source) and re.search(r'(?:かな|かね|ですか|ますか|でしょうか|だろうか)\s*$',source):source+='？'

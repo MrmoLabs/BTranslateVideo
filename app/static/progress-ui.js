@@ -18,8 +18,8 @@ if(typeof document==='undefined'){
 }else{
 const progressUI={items:[],active:0,loading:false,offset:0,lastFetch:0,keys:new Map(),openEvents:new Set(),pending:new Set(),logs:new Map(),logsOpen:new Set(),logsRevision:0};
 const progressActive=p=>['queued','running','cancelling'].includes(p.status);
-const progressStepLabels={retranscribe:'重新识别原声',check_asr:'短音频试识别',analyze:'识别与断句',translate:'翻译与审校',dub:'生成配音',export:'合成与导出',preview:'页面预览',optimize:'译文优化',audition:'单句试听',retranslate:'单句校对',subtitle_review:'批量字幕校对',reference:'原片取样',diarize:'识别说话人',model:'加载配音模型',audiobook:'章节配音',book_export:'合并全书'};
-const progressPhaseLabels={review_candidates:'批量生成校对候选',review_audio:'准备所选原声',cue_review:'生成校对建议',translation_review_required:'等待人工校对',diarization_audio:'准备说话人音频',diarization_wait:'等待说话人识别设备',diarization_load:'加载说话人模型',diarization_segmentation:'检测人声与切换',diarization_embeddings:'提取说话人声纹',diarization_clustering:'聚类区分说话人',diarization_discrete_diarization:'对齐说话人时间轴',diarization_speaker_counting:'估算说话人数',diarization_match:'匹配字幕角色',diarization_references:'准备角色参考音',diarization_review:'核对说话人分配',diarization_compute:'分析说话人',reference_extract:'提取角色参考音',audio_extract:'提取音频',asr_prepare:'检测语音与语言',asr_load:'加载识别模型',asr_decode:'识别原文',asr_service:'等待本地识别服务',segmentation_model:'准备断句模型',segmentation:'语义断句',translation_batches:'翻译与语义审校',translation_review:'审校优化建议',tts_generate:'生成配音',tts_cached:'复用已有配音',tts_service:'本地服务生成配音',audio_preflight:'预检已有配音时间',audio_prepare:'检查语音两端静音',alignment_plan:'规划配音时间轴',audio_align:'音频时间对齐',audio_merge:'合并配音音轨',background_separate:'分离原片背景音',background_mix:'混合背景音',video_mux:'封装视频与字幕',preview_encode:'编码页面预览',chapter_prepare:'准备章节音色',chapter_export_wav:'合并章节 WAV',chapter_export_mp3:'编码章节 MP3',book_export:'合并全书音频',model_load:'准备配音模型',queued:'排队等待'};
+const progressStepLabels={resegment:'重新断句',retranscribe:'重新识别原声',check_asr:'短音频试识别',analyze:'识别与断句',translate:'翻译与审校',dub:'生成配音',export:'合成与导出',preview:'页面预览',optimize:'译文优化',retranslate_all:'重新翻译全部',audition:'单句试听',retranslate:'单句校对',subtitle_review:'批量字幕校对',reference:'原片取样',diarize:'识别说话人',model:'加载配音模型',audiobook:'章节配音',book_export:'合并全书'};
+const progressPhaseLabels={review_candidates:'批量生成校对候选',review_audio:'准备所选原声',cue_review:'生成校对建议',translation_review_required:'等待人工校对',diarization_audio:'准备说话人音频',diarization_wait:'等待说话人识别设备',diarization_load:'加载说话人模型',diarization_segmentation:'检测人声与切换',diarization_embeddings:'提取说话人声纹',diarization_clustering:'聚类区分说话人',diarization_discrete_diarization:'对齐说话人时间轴',diarization_speaker_counting:'估算说话人数',diarization_match:'匹配字幕角色',diarization_references:'准备角色参考音',diarization_review:'核对说话人分配',diarization_compute:'分析说话人',reference_extract:'提取角色参考音',audio_extract:'提取音频',asr_prepare:'检测语音与语言',asr_load:'加载识别模型',asr_decode:'识别原文',asr_service:'等待本地识别服务',segmentation_model:'准备断句模型',segmentation:'语义断句',segmentation_review:'复核字幕边界',translation_batches:'翻译与语义审校',translation_review:'审校优化建议',tts_generate:'生成配音',tts_cached:'复用已有配音',tts_service:'本地服务生成配音',audio_preflight:'预检已有配音时间',audio_prepare:'检查语音两端静音',alignment_plan:'规划配音时间轴',audio_align:'音频时间对齐',audio_merge:'合并配音音轨',background_separate:'分离原片背景音',background_mix:'混合背景音',video_mux:'封装视频与字幕',preview_encode:'编码页面预览',chapter_prepare:'准备章节音色',chapter_export_wav:'合并章节 WAV',chapter_export_mp3:'编码章节 MP3',book_export:'合并全书音频',model_load:'准备配音模型',queued:'排队等待'};
 const unitNames={chunks:'批',segments:'句',words:'词',seconds:'秒',chapters:'章'};
 function phaseTitle(p){const phase=p.phase||'';return tr(!progressActive(p)&&['check_asr','retranscribe'].includes(p.action)?progressStepLabels[p.action]:progressPhaseLabels[phase]||progressStepLabels[phase]||phase.replace(/^tts:|^book:/,''));}
 function progressNumber(value){return Number.isInteger(value)?String(value):Number(value).toFixed(1);}
@@ -30,6 +30,12 @@ function clockMarkup(p,phase=false){return `<span data-progress-clock="${phase?'
 function progressBar(p){
   const percent=displayProgressPercent(p),known=percent!==null,moving=!known&&['running','cancelling'].includes(p.status);
   return `<div class="task-meter ${moving?'indeterminate':''}" role="progressbar" aria-label="${esc(tr('当前阶段进度'))}" ${known?`aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(1)}"`:`aria-valuetext="${esc(tr('该阶段未提供细分进度'))}"`}><span style="width:${known?percent:moving?30:0}%"></span></div>`;
+}
+function resumeSegmentationButton(task){
+  if(task.kind!=='video'||task.id!==state.id||task.processing.id!==state.project?.processing?.id
+      ||!ProjectWorkflow.canResumeSegmentation(state.project))return '';
+  const disabled=state.saving||!!state.projectUnavailable;
+  return `<button type="button" data-resume-segmentation="${esc(task.processing.id)}" ${disabled?'disabled':''}>${esc(tr('继续断句'))}</button>`;
 }
 function taskCard(task){
   const p=task.processing,active=progressActive(p),known=displayProgressPercent(p),key=taskKey(task),pending=progressUI.pending.has(key);
@@ -44,7 +50,8 @@ function taskCard(task){
   ${p.current?`<p class="task-context">${esc(tr('当前内容：{0}',p.current))}</p>`:''}
   <dl class="task-metrics"><div><dt>${esc(tr(queued?'排队耗时':'任务耗时'))}</dt><dd>${clockMarkup(p)}</dd></div><div><dt>${esc(tr('本阶段耗时'))}</dt><dd>${p.phase_started_at?clockMarkup(p,true):'—'}</dd></div><div><dt>${esc(tr('片段复用'))}</dt><dd>${esc(p.reused?tr('{0} 句',p.reused):'—')}</dd></div><div><dt>${esc(tr('本阶段预计剩余'))}</dt><dd class="task-eta" data-eta-updated="${p.updated_at}" data-eta-active="${active}">${esc(eta)}</dd></div></dl>
   ${task.overall_total?`<p class="task-overall">${esc(tr('本次任务已完成：{0} / {1} {2}',task.overall_done||0,task.overall_total,tr(unitNames[task.overall_unit]||task.overall_unit)))}</p>`:''}
-  <p class="task-wait-note" data-progress-wait="${p.updated_at}" data-progress-status="${p.status}" hidden></p><div class="task-progress-footer"><small>${esc(tr('最近进展'))} <span data-progress-age="${p.updated_at}" data-progress-finish="${p.finished_at||''}"></span></small>${active?`<button class="text-button" data-cancel-progress="${esc(key)}" ${pending||p.status==='cancelling'?'disabled':''}>${esc(tr(pending||p.status==='cancelling'?'正在取消…':'取消任务'))}</button>`:''}</div>
+  <p class="task-wait-note" data-progress-wait="${p.updated_at}" data-progress-status="${p.status}" hidden></p><div class="task-progress-footer"><small>${esc(tr('最近进展'))} <span data-progress-age="${p.updated_at}" data-progress-finish="${p.finished_at||''}"></span></small>${active?`<button class="text-button" data-cancel-progress="${esc(key)}" ${pending||p.status==='cancelling'?'disabled':''}>${esc(tr(pending||p.status==='cancelling'?'正在取消…':'取消任务'))}</button>`:resumeSegmentationButton(task)}</div>
+  ${task.kind==='video'&&p.network_translation?`<button type="button" class="text-button" data-task-translation-requests="${esc(key)}">${esc(tr('查看网络翻译请求'))}</button>`:''}
   ${task.error?`<p class="error task-error-summary">${esc(task.error.split('\n')[0].slice(0,200))}</p><details><summary>${esc(tr('错误详情'))}</summary><pre class="task-error">${esc(task.error)}</pre></details>`:''}
   <details class="task-events" data-task-events="${esc(key)}" ${progressUI.openEvents.has(key)?'open':''}><summary>${esc(tr('阶段进展记录'))}</summary><ol>${p.events.map(event=>`<li><time>${esc(new Date(event.time*1000).toLocaleTimeString(I18N.locale(),{hour12:false}))}</time><span>${esc(tr(event.message))}</span></li>`).join('')}</ol></details><details class="task-diagnostic" data-task-log-details="${esc(key)}" ${progressUI.logsOpen.has(key)?'open':''}><summary>${esc(tr('诊断日志'))}</summary><button type="button" data-task-load-log="${esc(key)}">${esc(tr('读取诊断日志'))}</button><pre>${esc(progressUI.logs.get(key)?.run===p.id?progressUI.logs.get(key).content:'')}</pre></details></article>`;
 }
@@ -54,7 +61,7 @@ function compactTaskCard(task){
   const count=typeof p.done==='number'&&p.total>0?tr('{0} / {1} {2}',progressNumber(p.done),progressNumber(p.total),tr(unitNames[p.unit]||p.unit)):'';
   const eta=active&&p.eta_seconds&&p.status!=='queued'?`<span class="task-inline-eta" data-eta-updated="${p.updated_at}" data-eta-active="true">${esc(tr('预计还需 {0}',progressDuration(p.eta_seconds)))}</span>`:'';
   const note=task.error?.split('\n')[0]||(p.phase==='translation_review_required'?tr('部分句子已跳过，请在字幕校对中筛选“译文待核对”。'):'')||(p.status==='queued'?tr('前方还有 {0} 个任务',task.queue_ahead||0):p.current?tr('当前内容：{0}',p.current):'');
-  return `<article class="task-progress-card task-progress-compact task-${esc(p.status)}" data-task-key="${esc(key)}"><div class="task-inline-heading"><span class="task-state"><i aria-hidden="true"></i>${esc(tr(p.phase==='translation_review_required'?'待人工处理':labels[p.status]||p.status))}</span><b class="task-inline-phase">${esc(phaseTitle(p))}</b>${count?`<span class="task-inline-count">${esc(count)}${percent!==null&&active?' · '+Math.floor(percent)+'%':''}</span>`:''}<span class="task-inline-time">${esc(tr(p.status==='queued'?'已等待':'耗时'))} ${clockMarkup(p)}</span>${eta}<div class="task-inline-actions"><button type="button" class="text-button" data-open-progress="${esc(key)}">${esc(tr('详情与日志'))}</button>${active?`<button type="button" class="text-button" data-cancel-progress="${esc(key)}" ${progressUI.pending.has(key)||p.status==='cancelling'?'disabled':''}>${esc(tr(p.status==='cancelling'?'正在取消…':'取消任务'))}</button>`:''}</div></div>${active?progressBar(p):''}${note?`<p class="task-inline-note ${task.error?'error':''}" title="${esc(note)}">${esc(note)}</p>`:''}</article>`;
+  return `<article class="task-progress-card task-progress-compact task-${esc(p.status)}" data-task-key="${esc(key)}"><div class="task-inline-heading"><span class="task-state"><i aria-hidden="true"></i>${esc(tr(p.phase==='translation_review_required'?'待人工处理':labels[p.status]||p.status))}</span><b class="task-inline-phase">${esc(phaseTitle(p))}</b>${count?`<span class="task-inline-count">${esc(count)}${percent!==null&&active?' · '+Math.floor(percent)+'%':''}</span>`:''}<span class="task-inline-time">${esc(tr(p.status==='queued'?'已等待':'耗时'))} ${clockMarkup(p)}</span>${eta}<div class="task-inline-actions">${resumeSegmentationButton(task)}<button type="button" class="text-button" data-open-progress="${esc(key)}">${esc(tr('详情与日志'))}</button>${active?`<button type="button" class="text-button" data-cancel-progress="${esc(key)}" ${progressUI.pending.has(key)||p.status==='cancelling'?'disabled':''}>${esc(tr(p.status==='cancelling'?'正在取消…':'取消任务'))}</button>`:''}</div></div>${active?progressBar(p):''}${note?`<p class="task-inline-note ${task.error?'error':''}" title="${esc(note)}">${esc(note)}</p>`:''}</article>`;
 }
 function updateProgressClocks(){
   const now=nowProgress();
@@ -70,10 +77,10 @@ function updateProgressClocks(){
   }
 }
 function mountTaskCards(node,tasks,compact=false){
-  const key=JSON.stringify([tasks,compact,I18N.locale(),[...progressUI.pending],progressUI.logsRevision]);if(progressUI.keys.get(node.id)===key)return;
-  const focused=node.contains(document.activeElement)?{cancel:document.activeElement?.dataset.cancelProgress,open:document.activeElement?.dataset.openProgress}:null;
+  const key=JSON.stringify([tasks,compact,I18N.locale(),[...progressUI.pending],progressUI.logsRevision,state.id,state.project?.processing?.id,state.project?.status,state.saving,!!state.projectUnavailable]);if(progressUI.keys.get(node.id)===key)return;
+  const focus= node.contains(document.activeElement)?document.activeElement?.dataset:null;
   node.innerHTML=tasks.map(compact?compactTaskCard:taskCard).join('');progressUI.keys.set(node.id,key);
-  if(focused){const button=[...node.querySelectorAll('[data-cancel-progress],[data-open-progress]')].find(button=>!button.disabled&&((focused.cancel&&button.dataset.cancelProgress===focused.cancel)||(focused.open&&button.dataset.openProgress===focused.open)));button?.focus({preventScroll:true});}
+  if(focus){const button=[...node.querySelectorAll('[data-cancel-progress],[data-open-progress],[data-resume-segmentation]')].find(button=>!button.disabled&&['cancelProgress','openProgress','resumeSegmentation'].some(key=>focus[key]&&button.dataset[key]===focus[key]));button?.focus({preventScroll:true});}
   for(const detail of node.querySelectorAll('[data-task-log-details]'))detail.ontoggle=()=>detail.open?progressUI.logsOpen.add(detail.dataset.taskLogDetails):progressUI.logsOpen.delete(detail.dataset.taskLogDetails);
   for(const detail of node.querySelectorAll('[data-task-events]'))detail.ontoggle=()=>detail.open?progressUI.openEvents.add(detail.dataset.taskEvents):progressUI.openEvents.delete(detail.dataset.taskEvents);
 }
@@ -110,7 +117,66 @@ $('#task-progress-dialog').addEventListener('close',()=>{const position=$('#task
 $('#show-task-progress').onclick=openTaskProgress;$('#task-peek').onclick=openTaskProgress;
 new ResizeObserver(entries=>document.documentElement.style.setProperty('--floating-tools-height',entries[0].target.offsetHeight+'px')).observe($('#floating-tools'));
 $('#refresh-task-progress').onclick=()=>guard(refreshTaskProgress);
+let translationRequestView=null;
+async function refreshTranslationRequests(){
+  const view=translationRequestView;
+  if(!view||view.loading||!$('#translation-request-dialog').open)return;
+  const picker=$('#translation-request-picker'),requested=picker.value;
+  const query=new URLSearchParams({run:view.run,request_id:requested});
+  view.loading=true;
+  try{
+    const data=await api(`/api/projects/${view.project}/translation-requests?${query}`,{cache:'no-store'});
+    if(view!==translationRequestView||requested!==picker.value)return;
+    const items=data.requests;
+    const key=JSON.stringify([I18N.locale(),items.map(row=>[row.id,!!row.finished,row.http_status])]);
+    if(key!==view.optionsKey){
+      picker.replaceChildren(new Option(tr('跟随最新请求'),''),
+        ...items.map(row=>new Option([
+          new Date(row.started*1000).toLocaleTimeString(I18N.locale(),{hour12:false}),
+          tr(row.phase||'网络翻译'),
+          row.ids.length?tr('第 {0}–{1} 段',row.ids[0],row.ids.at(-1)):'',
+          row.http_status?'HTTP '+row.http_status:''
+        ].filter(Boolean).join(' · '),row.id)));
+      if(items.some(row=>row.id===requested))picker.value=requested;
+      view.optionsKey=key;
+    }
+    const row=data.selected;
+    $('#translation-request-data').hidden=!row;
+    const status=$('#translation-request-status');
+    if(!row){status.textContent=tr('等待网络翻译请求');return;}
+    const elapsed=(row.finished??Date.now()/1000)-row.started;
+    const latency=row.first_response===null?'':tr('首个响应 {0} 秒',(row.first_response-row.started).toFixed(1));
+    status.textContent=[row.http_status?'HTTP '+row.http_status:'',
+      tr(row.finished?'请求已结束':row.first_response===null?'等待 API 返回':'正在接收响应'),
+      tr('耗时 {0} 秒',Math.max(0,elapsed).toFixed(1)),latency,row.truncated?tr('仅显示部分内容'):''].filter(Boolean).join(' · ');
+    for(const [id,value] of [['url',row.url],['body',row.request],['content',row.content],['raw',row.response],['error',row.error]]){
+      const target=$('#translation-request-'+id);
+      if(target.textContent!==value)target.textContent=value;
+    }
+  }catch(error){if(view===translationRequestView)$('#translation-request-status').textContent=error.message;}
+  finally{view.loading=false;}
+}
+$('#translation-request-picker').onchange=refreshTranslationRequests;
+$('#translation-request-dialog').addEventListener('close',()=>{translationRequestView=null;});
+setInterval(refreshTranslationRequests,1000);
 document.addEventListener('click',event=>{
+  const requests=event.target.closest('[data-task-translation-requests]');
+  if(requests){
+    const task=currentTask(requests.dataset.taskTranslationRequests);
+    if(!task)return;
+    translationRequestView={project:task.id,run:task.processing.id};
+    $('#translation-request-picker').value='';
+    $('#translation-request-data').hidden=true;
+    $('#translation-request-status').textContent=tr('等待网络翻译请求');
+    $('#translation-request-dialog').showModal();
+    refreshTranslationRequests();
+    return;
+  }
+  const resume=event.target.closest('[data-resume-segmentation]');
+  if(resume){
+    if(!resume.disabled&&resume.dataset.resumeSegmentation===state.project?.processing?.id&&ProjectWorkflow.canResumeSegmentation(state.project))guard(runResegment);
+    return;
+  }
   const detailButton=event.target.closest('[data-open-progress]');if(detailButton){openTaskProgress(detailButton.dataset.openProgress);return;}
   const logs=event.target.closest('[data-task-load-log]');
   if(logs){const key=logs.dataset.taskLoadLog,task=currentTask(key);if(!task||logs.disabled)return;logs.disabled=true;const run=task.processing.id;

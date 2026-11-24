@@ -57,6 +57,53 @@ def test_simple_sentence_avoids_extra_review_and_compaction_is_conditional(monke
     result=translate_batch("http://127.0.0.1",Settings(translation_review="off"),[dict(row(text="Create the first file."),end=1.5)],[],"course",threading.Event())
     assert result=={1:"创建第一个文件。"} and len(calls)==2
 
+
+def test_custom_system_prompt_reaches_draft_review_and_compaction(monkeypatch):
+    long_translation='各位同学，欢迎大家来到今天的沟通技巧课堂。'
+    replies=[[dict(id=1,zh=long_translation)],[dict(id=1,zh=long_translation)],[dict(id=1,zh='各位好。')]]
+    calls=stub(monkeypatch,replies)
+    settings=Settings(translation_system_prompt='  按讲者和学生对话的口吻翻译。\n避免书面套话。  ',
+                      translation_review='always')
+    result=run_workflow('http://localhost',settings,[dict(row(text='Welcome, everyone.'),end=1)],[],
+                        'course',threading.Event())
+    assert result[1]['zh']=='各位好。' and len(calls)==3
+    for call in calls:
+        prompt=call['messages'][0]
+        assert prompt['role']=='system' and prompt['content'].startswith('按讲者和学生对话的口吻翻译。\n避免书面套话。')
+        assert 'target_ids' in prompt['content'] and '输出语言为简体中文' in prompt['content']
+
+
+def test_custom_system_prompt_uses_official_bilibili_format(monkeypatch):
+    calls=stub(monkeypatch,[[dict(id=1,zh='各位好。')]])
+    settings=Settings(translation_provider='bilibili',translation_system_prompt='按口语表达。',
+                      translation_review='off',translation_compact=False)
+    run_workflow(settings.translation_service_url,settings,[row(text='Welcome, everyone.')],[],'course',threading.Event())
+    message,=calls[0]['messages']
+    assert message['role']=='user' and '按口语表达。' in message['content']
+    assert '〖源文〗' in message['content'] and '只输出 JSON' in message['content']
+
+
+def test_online_translation_splits_a_truncated_batch_without_repeating_it(monkeypatch):
+    sizes=[]
+
+    async def post(url,payload,cancel,**options):
+        data=json.loads(payload['messages'][1]['content'].removesuffix('\n/no_think'))
+        ids=data['target_ids']
+        sizes.append(len(ids))
+        if len(ids)>2:
+            choice=dict(finish_reason='length',message=dict(content=''))
+        else:
+            text=json.dumps({'translations':[dict(id=identifier,zh='各位好。') for identifier in ids]})
+            choice=dict(finish_reason='stop',message=dict(content=text))
+        return httpx.Response(200,json={'choices':[choice]},request=httpx.Request('POST',url))
+
+    monkeypatch.setattr('app.translation._post_cancellable',post)
+    settings=Settings(translation_provider='openai_remote',translation_api_url='https://example.com/v1',
+                      translation_review='off',translation_compact=False)
+    rows=[row(i,text='Hello.') for i in range(1,5)]
+    result=translate_batch(settings.translation_service_url,settings,rows,[],'course',threading.Event())
+    assert set(result)=={1,2,3,4} and sizes==[4,2,2]
+
 def test_literal_number_change_is_retried_with_feedback(monkeypatch):
     calls=stub(monkeypatch,[[dict(id=1,zh="需要120步。")],[dict(id=1,zh="需要12步。")]])
     monkeypatch.setattr(threading.Event,"wait",lambda *_: None)
@@ -69,6 +116,21 @@ def test_question_omission_in_review_and_compaction_is_retried(monkeypatch):
     result=run_workflow("http://127.0.0.1",Settings(translation_review="always"),[dict(row(text="What is the input? It is a 12-dimensional vector."),end=1)],[],"course",threading.Event())
     assert result[1]["zh"]=="什么输入？12维向量。" and len(calls)==5
     assert all("遗漏原文问句" in calls[i]["messages"][1]["content"] for i in [2,4])
+
+
+def test_local_review_retries_only_the_line_that_failed_validation(monkeypatch):
+    calls=stub(monkeypatch,[
+        [dict(id=1,zh='您好。'),dict(id=2,zh='有8个人。')],
+        [dict(id=1,zh='你好。'),dict(id=2,zh='有人。')],
+        [dict(id=1,zh='一共有8人。')],
+    ])
+    rows=[row(1,text='Hello.'),row(2,text='There are 8 people.')]
+    result=translate_batch("http://127.0.0.1",Settings(translation_review="always",translation_compact=False),
+                           rows,[],"course",threading.Event())
+    assert result=={1:'你好。',2:'一共有8人。'}
+    retry=json.loads(calls[2]["messages"][1]["content"].removesuffix("\n/no_think"))
+    assert [segment['text'] for segment in retry['segments']]==['There are 8 people.']
+    assert retry['context'][0]['zh']=='你好。'
 
 def test_unchanged_save_preserves_outputs_and_proposal(tmp_path):
     app=create_app(tmp_path/"projects")
@@ -100,6 +162,70 @@ def setup_project(app):
     st.update(ident,media={"duration":30},segments=[row(zh="只有在12步之后它做收敛。"),row(2,text="Hello.",zh="你好。")],outputs={"audio":"chinese.wav","video":"result.mkv"},dub_signature="keep")
     (folder/"result.mkv").write_bytes(b"old video");(folder/"chinese.wav").write_bytes(b"old audio")
     return st,ident
+
+
+def test_retranslate_all_queues_fresh_candidates_including_untranslated_cues(tmp_path, monkeypatch):
+    settings = Settings(translation_layout='paragraph', translation_review='off')
+    monkeypatch.setattr('app.server.load_settings', lambda: settings)
+    from contextlib import contextmanager
+    @contextmanager
+    def local(*_):
+        yield 'http://127.0.0.1'
+
+    calls = []
+    second_batch = threading.Event()
+    release_batch = threading.Event()
+    def workflow(url, config, batch, context, mode, cancel, **options):
+        assert config.translation_layout == 'paragraph'
+        assert options['existing'] is False and options['cache'] is None
+        assert all(not item['zh'] for item in [*batch, *context])
+        calls.extend(item['id'] for item in batch)
+        if batch[0]['id'] == 2:
+            second_batch.set()
+            assert release_batch.wait(5)
+        return {item['id']: dict(zh=f'新译文{item["id"]}', reason='', estimated_seconds=2) for item in batch}
+
+    monkeypatch.setattr('app.translation_proposals.local_translator', local)
+    monkeypatch.setattr('app.translation_proposals.run_workflow', workflow)
+    app = create_app(tmp_path/'projects')
+    with TestClient(app) as client:
+        store, identifier = setup_project(app)
+        initial = store.read(identifier)
+        rows = initial['segments'] + [row(3, text='One more.')]
+        rows[1]['speaker'] = 'speaker_2'
+        before = store.update(identifier, segments=rows)
+        endpoint = f'/api/projects/{identifier}'
+        base = client.get(endpoint+'/runtime').json()['content_version']
+        assert client.post(endpoint+'/run/retranslate_all').status_code == 200
+        future = app.state.pipeline.futures.get(identifier)
+        try:
+            assert second_batch.wait(5)
+            runtime = client.get(endpoint+'/runtime').json()
+            assert runtime['content_version'] == base and runtime['translation_preview']['done'] == 1
+            partial = client.get(endpoint+'/translation-proposal').json()
+            assert partial['partial'] and [item['id'] for item in partial['items']] == [1]
+            assert store.read(identifier)['segments'] == before['segments']
+        finally:
+            release_batch.set()
+        if future:
+            future.result(timeout=5)
+        project = store.read(identifier)
+        assert project['status'] == 'done'
+        assert project['segments'] == before['segments'] and project['outputs'] == before['outputs']
+        assert project['edit_revision'] == before['edit_revision']
+        assert project['translation_proposal']['kind'] == 'retranslate_all'
+        proposal = client.get(endpoint+'/translation-proposal').json()
+        assert not proposal['stale'] and calls == [1, 2, 3]
+        assert proposal['id'] == partial['id'] and not proposal.get('partial') and proposal['allow_edits']
+        assert proposal['items'][0]['before'] == before['segments'][0]['zh']
+        assert proposal['items'][2]['before'] == '' and proposal['items'][2]['after'] == '新译文3'
+        request=dict(proposal_id=proposal['id'],revision=proposal['base_revision'],ids=[3])
+        assert client.post(endpoint+'/translation-proposal/apply',json={**request,'edits':{1:'不在选择内'}}).status_code==409
+        assert client.post(endpoint+'/translation-proposal/apply',json={**request,'edits':{3:'   '}}).status_code==409
+        result = client.post(endpoint+'/translation-proposal/apply',json={**request,'edits':{3:' 人工改写的译文。 '}})
+        assert result.status_code == 200 and result.json()['segments'][2]['zh'] == '人工改写的译文。'
+        assert result.json()['segments'][:2] == before['segments'][:2]
+
 
 def proposal(app,ident):
     st=app.state.store;p=st.read(ident)
@@ -137,6 +263,38 @@ def test_stale_unknown_and_busy_proposal_cannot_overwrite(tmp_path):
         assert client.get(f"/api/projects/{ident}/translation-proposal").json()["stale"]
         assert client.post(url,json=payload).status_code==409
         assert st.read(ident)["segments"][1]["zh"]=="人工校对"
+
+def test_retranslation_keeps_unchanged_candidates_after_local_timeline_edits(tmp_path):
+    app=create_app(tmp_path/"projects")
+    with TestClient(app) as client:
+        store,identifier=setup_project(app)
+        before=store.read(identifier)
+        request=proposal(app,identifier)
+        meta=store.read(identifier)['translation_proposal']
+        store.update(identifier,translation_proposal={**meta,'kind':'retranslate_all'})
+        folder=store.folder(identifier)
+        path=folder/'proposals'/(meta['id']+'.json')
+        original=json.loads(path.read_text(encoding='utf-8'))
+        original['items'].append(dict(id=2,source='Hello.',before='你好。',after='大家好。'))
+        atomic_json(path,original)
+        atomic_json(folder/'segments.previous.json',before['segments'])
+        segments=[dict(r) for r in before['segments']]
+        segments[1]['end']-=1
+        current=store.update(identifier,segments=segments)
+        endpoint=f"/api/projects/{identifier}/translation-proposal"
+
+        visible=client.get(endpoint).json()
+        assert visible['id']==meta['id'] and visible['allow_edits'] and not visible['stale']
+        assert visible['base_revision']==current['edit_revision']
+        assert visible['needs_retranslation']==1 and [item['id'] for item in visible['items']]==[1]
+        atomic_json(folder/'segments.previous.json',segments)
+        assert client.get(endpoint).json()['items']==visible['items']
+        assert client.post(endpoint+'/apply',json=request).status_code==409
+        updated=client.post(endpoint+'/apply',json={**request,'revision':current['edit_revision'],'edits':{1:'完成12步后，就会收敛。'}})
+        assert updated.status_code==200
+        assert updated.json()['segments'][0]['zh']=='完成12步后，就会收敛。'
+        assert updated.json()['segments'][1]==segments[1]
+
 
 def test_failed_optimization_keeps_subtitles_and_completed_outputs(tmp_path,monkeypatch):
     app=create_app(tmp_path/"projects");st,ident=setup_project(app);before=st.read(ident)
