@@ -158,6 +158,8 @@ def run_clips(model, clips, batch_size=1, stats_path=None, progress_path=None, m
             size=min(cap,allowed);reason=''
             if first.get('emotion_reference'):
                 size=1;reason='本句原声情绪使用独立参考音'
+            elif first.get('duration_factor',1)!=1:
+                size=1;reason='按本句时长独立合成'
             elif first.get('lang','ZH').upper()!='ZH':
                 size=1;reason='当前目标语言使用原生逐句合成'
             elif not ready:
@@ -167,7 +169,7 @@ def run_clips(model, clips, batch_size=1, stats_path=None, progress_path=None, m
             elif allowed<cap: reason=f'显存余量不足，批量上限降为 {allowed}'
             group=[]
             for clip in pending:
-                if len(group)>=size or clip['reference']!=first['reference'] or emotion_key(clip)!=emotion_key(first) or clip.get('lang','ZH').upper()!=first.get('lang','ZH').upper() or (group and (clip.get('emotion_reference') or len(clip['text'])>100 or clip['output']==single_output)): break
+                if len(group)>=size or clip['reference']!=first['reference'] or emotion_key(clip)!=emotion_key(first) or clip.get('lang','ZH').upper()!=first.get('lang','ZH').upper() or (group and (clip.get('emotion_reference') or clip.get('duration_factor',1)!=1 or len(clip['text'])>100 or clip['output']==single_output)): break
                 group.append(clip)
             actual=len(group)
             if actual==1 and not reason:reason='单段兼容模式' if requested==1 else '本角色待处理片段不足以合批'
@@ -177,7 +179,7 @@ def run_clips(model, clips, batch_size=1, stats_path=None, progress_path=None, m
                     native_batch(model,group);batches+=1
                 else:
                     clip=group[0]
-                    model.infer(spk_audio_prompt=clip['reference'],text=clip['text'],output_path=clip['output']+'.pending.wav',lang=clip.get('lang','ZH').upper(),duration_factor=1.0,verbose=False,**emotion_kwargs(clip))
+                    model.infer(spk_audio_prompt=clip['reference'],text=clip['text'],output_path=clip['output']+'.pending.wav',lang=clip.get('lang','ZH').upper(),duration_factor=clip.get('duration_factor',1.0),verbose=False,**emotion_kwargs(clip))
                     os.replace(clip['output']+'.pending.wav',clip['output'])
             except (RuntimeError,ValueError) as exc:
                 if actual==1: raise

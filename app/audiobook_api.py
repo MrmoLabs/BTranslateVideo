@@ -35,6 +35,7 @@ class Generate(BaseModel):
 class RecordingStart(BaseModel):
     kind:str
     device:int|None=None
+    guide:bool=False
 
 def attach(app,store,pipeline,voices):
     books=BookStore(store.root.parent/'audiobooks');narration=Narration(books,voices,pipeline)
@@ -44,7 +45,7 @@ def attach(app,store,pipeline,voices):
     @router.get('/recording/devices')
     def devices():return recordings.devices()
     @router.post('/recording/start')
-    def start(data:RecordingStart):return recordings.start(data.kind,data.device)
+    def start(data:RecordingStart):return recordings.start(data.kind,data.device,guide=data.guide)
     @router.get('/recording/{token}')
     def status(token:str):return recordings.status(token)
     @router.post('/recording/{token}/stop')

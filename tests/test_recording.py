@@ -59,3 +59,19 @@ def test_cancel_and_silence_never_publish_a_reference_file(tmp_path):
     with pytest.raises(HTTPException):recorder.audio(token)
     assert not list((tmp_path/token).glob('*.wav'))
     recorder.close()
+
+
+@pytest.mark.parametrize('guide,expected', [(True, 'ready'), (False, 'failed')])
+def test_short_take_is_accepted_only_for_a_guide(tmp_path, guide, expected):
+    recorder = Recorder(tmp_path, Provider())
+    token = recorder.start('microphone', guide=guide)['id']
+    try:
+        deadline = time.monotonic() + 2
+        while recorder.status(token)['duration'] < .25 and time.monotonic() < deadline:
+            time.sleep(.001)
+        recorder.stop(token)
+        result = wait(recorder, token)
+        assert .2 <= result['duration'] < 3
+        assert result['status'] == expected
+    finally:
+        recorder.close()

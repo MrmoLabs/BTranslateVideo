@@ -224,6 +224,10 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             changed=(previous.tts_keep_loaded,previous.tts_idle_minutes)!=(settings.tts_keep_loaded,settings.tts_idle_minutes)
             save_settings(settings)
         if changed:pipeline.tts.configure_retention(None if settings.tts_keep_loaded else settings.tts_idle_minutes*60)
+        if previous.drama3_idle_seconds != settings.drama3_idle_seconds:
+            with pipeline.lock:
+                if not pipeline.events:
+                    pipeline.drama3.retain(settings.drama3_idle_seconds)
         return settings_view(settings)
 
     @app.get('/api/model-backends')

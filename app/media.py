@@ -37,7 +37,8 @@ def spawn(args, **kwargs):
     return subprocess.Popen([str(arg) for arg in args], **kwargs)
 
 
-def run(args, logfile: Path, cancel: Event, cwd: Path | None = None, env=None, timeout=7200, on_tick=None, poll_interval=.2):
+def run(args, logfile: Path, cancel: Event, cwd: Path | None = None, env=None, timeout=7200, on_tick=None, poll_interval=.2,
+        success_codes=(0,)):
     logfile.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with logfile.open("ab") as output:
@@ -55,7 +56,7 @@ def run(args, logfile: Path, cancel: Event, cwd: Path | None = None, env=None, t
                     on_tick()
                     last_tick = time.monotonic()
                 cancel.wait(poll_interval)
-            if process.returncode:
+            if process.returncode not in success_codes:
                 with logfile.open("rb") as stream:
                     stream.seek(max(log_start, logfile.stat().st_size - 3000))
                     tail = stream.read().decode("utf-8", errors="replace")

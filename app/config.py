@@ -36,6 +36,17 @@ class Settings(BaseModel):
     tts_voice: str = 'default'
     tts_languages: str = 'zh,en,ja,es,ar'
     tts_revision: str = ''
+    vc_provider: Literal['off', 'seed_vc'] = 'off'
+    vc_root: str = 'vendor/seed-vc'
+    vc_python: str = ''
+    vc_hf_endpoint: str = 'https://hf-mirror.com'
+    vc_steps: int = Field(default=25, ge=4, le=100)
+    vc_cfg_rate: float = Field(default=0.7, ge=0, le=1)
+    drama3_executable: str = ''
+    drama3_model: str = ''
+    drama3_backend: Literal['vulkan', 'cuda', 'cpu'] = 'vulkan'
+    drama3_cpu_expert_layers: int = Field(default=8, ge=0, le=40)
+    drama3_idle_seconds: int = Field(default=90, ge=0, le=300)
     model_service_timeout: int = Field(default=180, ge=5, le=3600)
     asr_model: str = "models/faster-whisper-large-v3"
     asr_device: str = "cuda"

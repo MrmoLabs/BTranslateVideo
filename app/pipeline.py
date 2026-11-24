@@ -25,6 +25,7 @@ from .project_roles import project_roles,reference_window,UNASSIGNED_SPEAKER
 from .translation_proposals import generate_proposal
 from .translation_requests import TranslationRequests, request_scope
 from .emotions import emotion_fields
+from .drama3 import Drama3Session
 from .tts_session import TTSSession
 from .progress import ACTIVE, TERMINAL, new_progress, advance, finish, tts_detail
 from .model_backends import tts_backend, tts_model_signature, validate_tts, transcribe, synthesize_service, translation_parallelism
@@ -131,6 +132,7 @@ class Pipeline:
         self.futures = {}
         self.lock = threading.RLock()
         self.tts = TTSSession()
+        self.drama3 = Drama3Session()
         self.model_task = dict(status='idle', error='')
         self.model_log = None
         self.translation_requests = TranslationRequests()
@@ -179,6 +181,7 @@ class Pipeline:
 
     def _load_tts_model(self, settings, cancel, folder):
         try:
+            self.drama3.release()
             with self.lock:self.model_task={**self.model_task,'status':'loading','processing':advance(self.model_task['processing'],phase='model_load',message='准备配音模型')}
             request=dict(operation='load',clips=[],index_root=str(resolve(settings.index_root)),
                          model=str(resolve(settings.index_model)),version=settings.index_version)
@@ -255,6 +258,7 @@ class Pipeline:
             for event in self.events.values():
                 event.set()
         self.tts.close()
+        self.drama3.close()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def progress(self, identifier, stage, percent, message, detail=None):
@@ -287,6 +291,7 @@ class Pipeline:
         try:
             (folder / "cache").mkdir(exist_ok=True)
             check_cancel(cancel)
+            self.drama3.release()
             translation_incomplete=False
             from .project_experience import goal,effective_asr
             project=self.store.read(identifier);settings=effective_asr(settings,project)

@@ -39,7 +39,7 @@ class Recorder:
                 return dict(available=True,microphone=microphones,system=systems,error='')
         except Exception as exc:return dict(available=False,microphone=[],system=[],error=str(exc))
 
-    def start(self,kind,device=None):
+    def start(self,kind,device=None,*,guide=False):
         if kind not in {'microphone','system'}:raise ValueError('无效录音来源')
         devices=self.devices()
         if not devices['available']:raise ValueError(devices['error'])
@@ -50,7 +50,7 @@ class Recorder:
         with self.lock:
             if self.active and self.sessions[self.active]['status'] in {'starting','recording','stopping'}:raise HTTPException(409,'已有录音正在进行，请先停止或取消')
             token=uuid.uuid4().hex;folder=self.root/token;folder.mkdir(parents=True,exist_ok=True)
-            session=dict(id=token,kind=kind,device=chosen['name'],device_id=chosen['id'],status='starting',duration=0.,level=0.,error='',stop=threading.Event(),discard=False,created=time.monotonic(),path=folder/'recording.wav')
+            session=dict(id=token,kind=kind,device=chosen['name'],device_id=chosen['id'],status='starting',duration=0.,level=0.,error='',stop=threading.Event(),discard=False,created=time.monotonic(),path=folder/'recording.wav',guide=guide)
             self.sessions[token]=session;self.active=token
             thread=threading.Thread(target=self.capture,args=(session,),daemon=True,name='reference-recording');session['thread']=thread;thread.start()
             return self.status(token)
@@ -87,7 +87,9 @@ class Recorder:
                             peak=max(peak,value);wav.writeframesraw(data);frames+=len(data)//(2*channels)
                             with self.lock:session.update(duration=round(frames/rate,2),level=min(1.,value))
             if session['discard']:session['status']='cancelled';return
-            if frames/rate<3:raise ValueError('录音不足 3 秒，请重新录制')
+            minimum = .2 if session['guide'] else 3
+            if frames / rate < minimum:
+                raise ValueError(f'录音不足 {minimum:g} 秒，请重新录制')
             if peak<.0005:raise ValueError('未录到有效声音，请检查录音设备或系统播放音量')
             os.replace(pending,output)
             with self.lock:session.update(status='ready',level=0.)

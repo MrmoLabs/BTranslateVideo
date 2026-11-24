@@ -7,12 +7,39 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 from model_worker import block_network
 from app.file_io import write_progress
 
 
+def separate_bandit(request):
+    import numpy as np
+    import soundfile as sf
+
+    sys.path.insert(0, request['runner'])
+    from bandit_infer import BanditSession
+
+    rate = 48000
+    if not 0 < request['duration'] <= 120:
+        raise ValueError('BandIt 适用于 120 秒以内的游戏混音资源')
+    decoded = subprocess.run([request['ffmpeg'], '-hide_banner', '-nostdin', '-loglevel', 'error', '-i', request['source'],
+        '-ac', '2', '-ar', str(rate), '-f', 'f32le', 'pipe:1'], capture_output=True, check=True)
+    samples = np.frombuffer(decoded.stdout, dtype='<f4').reshape(-1, 2).T.copy()
+    with BanditSession('v2-multi', device='auto', checkpoint_path=Path(request['model']),
+                       checkpoint_sha256=request['weights_sha256']) as model:
+        stems = model.infer(samples, sample_rate=rate)
+    background = (stems['music'] + stems['effects']).T
+    output = Path(request['output'])
+    pending = output.with_suffix('.pending.flac')
+    sf.write(pending, background, rate, format='FLAC', subtype='PCM_24')
+    os.replace(pending, output)
+    write_progress(request['progress'], dict(frames=len(background), total=len(background), model='BandIt v2'))
+
+
 def separate(request):
+    if request.get('backend') == 'bandit':
+        return separate_bandit(request)
     import numpy as np
     import soundfile as sf
     import torch

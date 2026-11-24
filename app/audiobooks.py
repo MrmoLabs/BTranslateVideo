@@ -292,6 +292,7 @@ class Narration:
         try:
             self.job(book,status='running',phase='准备音色',error='')
             if kind=='generate':
+                self.pipeline.drama3.release()
                 completed=0
                 for cid in ids:
                     check_cancel(cancel);self.generate_chapter(book,cid,settings,cancel,sentence_ids,completed)
